@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Production Worker. Serves the React app (static assets) and the /api/* backend.
+  "name": "backlink-health-checker",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "assets": {
+    // Unknown paths fall back to index.html so client-side routes work.
+    "not_found_handling": "single-page-application",
+    // /api/* always goes to the Worker first, never to static files.
+    "run_worker_first": ["/api/*"],
+  },
+  "vars": {
+    "APP_ENV": "production",
+    "APP_NAME": "Backlink Health Checker",
+  },
+
+  // Bindings added in later phases (kept here so the plan is visible):
+  //   Phase 3  -> "d1_databases"  (DB)
+  //   Phase 5  -> "queues"        (SCAN_QUEUE)
+  //   Phase 8  -> "r2_buckets"    (EXPORTS) if exports get large
+  //   Phase 11 -> "triggers": { "crons": [...] }
+
+  "env": {
+    "staging": {
+      "name": "backlink-health-checker-staging",
+      "vars": {
+        "APP_ENV": "staging",
+        "APP_NAME": "Backlink Health Checker (Staging)",
+      },
+    },
+  },
+}
