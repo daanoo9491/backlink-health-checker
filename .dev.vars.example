@@ -1,4 +1,7 @@
-# Copy to .dev.vars for local Worker secrets (loaded by `npm run dev`).
-# Production values are set with: npx wrangler secret put <NAME>
-# Phase 1+ will add, for example:
-# SESSION_SECRET=replace-with-a-long-random-string
+# Copy to .dev.vars for local development (npm run dev). Never commit .dev.vars.
+# In Cloudflare, add the same names under Worker → Settings → Variables and Secrets
+# (type: Secret), separately for production and staging.
+AUTH_EMAIL=you@example.com
+AUTH_PASSWORD=choose-a-strong-password
+# At least 32 random characters. Generate one with: npm run secret
+SESSION_SECRET=replace-with-at-least-32-random-characters

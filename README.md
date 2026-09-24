@@ -2,7 +2,7 @@
 
 Upload an Excel workbook of backlinks, find out which backlink pages are still live, and download the results. Built for Marketing users, hosted entirely on Cloudflare.
 
-> **Current status: Phase 0 — Project Foundation.** The app deploys and serves a placeholder page plus a health API. See [docs/PHASES.md](docs/PHASES.md) for the roadmap.
+> **Current status: Phase 1 — UI Foundation.** Sign-in, dashboard, new scan (upload page), scan history and settings screens. Scanning arrives in later phases. See [docs/PHASES.md](docs/PHASES.md).
 
 ## Architecture
 
@@ -51,7 +51,8 @@ Requirements: Node.js 22 (see `.nvmrc`), npm, a Cloudflare account.
 git clone https://github.com/<you>/backlink-health-checker.git
 cd backlink-health-checker
 npm install
-cp .dev.vars.example .dev.vars   # local Worker secrets (empty for Phase 0)
+cp .dev.vars.example .dev.vars   # then edit: your sign-in email, password and a session secret
+npm run secret                   # prints a random SESSION_SECRET to paste into .dev.vars
 npm run dev                      # http://localhost:5173
 ```
 
@@ -80,6 +81,18 @@ npm run dev                      # http://localhost:5173
 | `.dev.vars`               | Local Worker secrets                            | Not committed; copy from `.dev.vars.example`                     |
 | Cloudflare secrets        | Production Worker secrets                       | `npx wrangler secret put NAME` (add `--env staging` for staging) |
 | GitHub Actions secrets    | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Repo → Settings → Secrets and variables → Actions                |
+
+### Sign-in secrets (required from Phase 1)
+
+Each Worker (production **and** staging) needs three secrets. In Cloudflare: **Workers & Pages** → the Worker → **Settings** → **Variables and Secrets** → **Add** → type **Secret**.
+
+| Name             | Value                                        |
+| ---------------- | -------------------------------------------- |
+| `AUTH_EMAIL`     | The email used to sign in                    |
+| `AUTH_PASSWORD`  | The sign-in password (use a strong one)      |
+| `SESSION_SECRET` | 32+ random characters — run `npm run secret` |
+
+Or from the terminal: `npx wrangler secret put AUTH_EMAIL` (add `--env staging` for staging). Secrets survive deploys. Until they are set, the login page says sign-in isn't set up. Phase 3 replaces this single account with a users table.
 
 **Never commit** `.env`, `.dev.vars`, API keys or tokens. `.gitignore` blocks them and CI fails if one is tracked.
 
@@ -122,7 +135,7 @@ npm test          # run once
 npm run test:watch
 ```
 
-Tests call the Hono app directly (`createApp().request(...)`), so no Worker needs to be running.
+Tests cover sign-in, sessions, CSRF, status labels and upload checks. They call the Hono app directly (`createApp().request(...)`), so no Worker needs to be running.
 
 ## Troubleshooting
 

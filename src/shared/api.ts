@@ -1,6 +1,5 @@
 /**
  * Types shared by the Worker (backend) and the React app (frontend).
- * Keep machine-readable values here; friendly UI labels live in the client.
  */
 
 export interface HealthResponse {
@@ -18,4 +17,37 @@ export interface ApiError {
     message: string;
     requestId?: string;
   };
+}
+
+export interface SessionUser {
+  email: string;
+}
+
+export interface MeResponse {
+  user: SessionUser;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface RecentScan {
+  id: string;
+  fileName: string;
+  createdAt: string;
+  urlsChecked: number;
+  active: number;
+  dead: number;
+  issues: number;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+}
+
+export interface DashboardSummary {
+  totalScans: number;
+  urlsChecked: number;
+  activeLinks: number;
+  deadLinks: number;
+  issuesFound: number;
+  recentScans: RecentScan[];
 }

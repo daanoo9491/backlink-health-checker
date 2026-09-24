@@ -1,0 +1,2924 @@
+From 36a734534083b80f377e7a6f5267128b0bcd92d6 Mon Sep 17 00:00:00 2001
+From: daanoo9491 <bilaljahangir1995@gmail.com>
+Date: Thu, 24 Sep 2026 16:01:33 +0000
+Subject: [PATCH] feat: add Phase 1 UI foundation
+
+- Sign-in with signed session cookies, sign-out, protected routes
+- CSRF origin check on all state-changing API requests
+- App shell: sidebar, header, responsive mobile menu
+- Dashboard, New scan (upload + file checks), Scan history, Settings, 404
+- Shared link-status model and accessible status badges
+- Tests for auth, sessions, CSRF, statuses and upload rules
+---
+ .dev.vars.example                     |  11 +-
+ README.md                             |  19 +-
+ docs/PHASES.md                        |  46 +-
+ package-lock.json                     |  47 +-
+ package.json                          |   9 +-
+ src/client/App.tsx                    |  42 --
+ src/client/api/client.ts              |  42 ++
+ src/client/auth/AuthProvider.tsx      |  32 +
+ src/client/auth/RequireAuth.tsx       |  15 +
+ src/client/auth/auth-context.ts       |  17 +
+ src/client/components/AppLayout.tsx   |  94 +++
+ src/client/components/FileDrop.tsx    |  53 ++
+ src/client/components/Icon.tsx        |  42 ++
+ src/client/components/StatusBadge.tsx |  24 +
+ src/client/lib/file-handoff.ts        |  15 +
+ src/client/lib/format.ts              |  16 +
+ src/client/lib/upload-rules.ts        |  13 +
+ src/client/main.tsx                   |  11 +-
+ src/client/pages/DashboardPage.tsx    | 105 ++++
+ src/client/pages/LoginPage.tsx        | 100 ++++
+ src/client/pages/NewScanPage.tsx      | 103 ++++
+ src/client/pages/NotFoundPage.tsx     |  13 +
+ src/client/pages/ScanHistoryPage.tsx  |  70 +++
+ src/client/pages/SettingsPage.tsx     |  63 ++
+ src/client/router.tsx                 |  28 +
+ src/client/styles.css                 | 824 ++++++++++++++++++++++++--
+ src/shared/api.ts                     |  34 +-
+ src/shared/status.ts                  |  74 +++
+ src/worker/app.ts                     |  26 +-
+ src/worker/auth/session.ts            |  74 +++
+ src/worker/env.ts                     |  11 +-
+ src/worker/errors.ts                  |   9 +
+ src/worker/middleware/auth.ts         |  15 +
+ src/worker/middleware/csrf.ts         |  24 +
+ src/worker/routes/auth.ts             |  60 ++
+ src/worker/routes/dashboard.ts        |  17 +
+ src/worker/version.ts                 |   2 +-
+ tests/worker/auth.test.ts             | 108 ++++
+ tests/worker/helpers.ts               |  34 ++
+ tests/worker/session.test.ts          |  30 +
+ tests/worker/status.test.ts           |  24 +
+ tests/worker/upload-rules.test.ts     |  20 +
+ 42 files changed, 2285 insertions(+), 131 deletions(-)
+ delete mode 100644 src/client/App.tsx
+ create mode 100644 src/client/api/client.ts
+ create mode 100644 src/client/auth/AuthProvider.tsx
+ create mode 100644 src/client/auth/RequireAuth.tsx
+ create mode 100644 src/client/auth/auth-context.ts
+ create mode 100644 src/client/components/AppLayout.tsx
+ create mode 100644 src/client/components/FileDrop.tsx
+ create mode 100644 src/client/components/Icon.tsx
+ create mode 100644 src/client/components/StatusBadge.tsx
+ create mode 100644 src/client/lib/file-handoff.ts
+ create mode 100644 src/client/lib/format.ts
+ create mode 100644 src/client/lib/upload-rules.ts
+ create mode 100644 src/client/pages/DashboardPage.tsx
+ create mode 100644 src/client/pages/LoginPage.tsx
+ create mode 100644 src/client/pages/NewScanPage.tsx
+ create mode 100644 src/client/pages/NotFoundPage.tsx
+ create mode 100644 src/client/pages/ScanHistoryPage.tsx
+ create mode 100644 src/client/pages/SettingsPage.tsx
+ create mode 100644 src/client/router.tsx
+ create mode 100644 src/shared/status.ts
+ create mode 100644 src/worker/auth/session.ts
+ create mode 100644 src/worker/errors.ts
+ create mode 100644 src/worker/middleware/auth.ts
+ create mode 100644 src/worker/middleware/csrf.ts
+ create mode 100644 src/worker/routes/auth.ts
+ create mode 100644 src/worker/routes/dashboard.ts
+ create mode 100644 tests/worker/auth.test.ts
+ create mode 100644 tests/worker/helpers.ts
+ create mode 100644 tests/worker/session.test.ts
+ create mode 100644 tests/worker/status.test.ts
+ create mode 100644 tests/worker/upload-rules.test.ts
+
+diff --git a/.dev.vars.example b/.dev.vars.example
+index 67342c5..f0d4070 100644
+--- a/.dev.vars.example
++++ b/.dev.vars.example
+@@ -1,4 +1,7 @@
+-# Copy to .dev.vars for local Worker secrets (loaded by `npm run dev`).
+-# Production values are set with: npx wrangler secret put <NAME>
+-# Phase 1+ will add, for example:
+-# SESSION_SECRET=replace-with-a-long-random-string
++# Copy to .dev.vars for local development (npm run dev). Never commit .dev.vars.
++# In Cloudflare, add the same names under Worker → Settings → Variables and Secrets
++# (type: Secret), separately for production and staging.
++AUTH_EMAIL=you@example.com
++AUTH_PASSWORD=choose-a-strong-password
++# At least 32 random characters. Generate one with: npm run secret
++SESSION_SECRET=replace-with-at-least-32-random-characters
+diff --git a/README.md b/README.md
+index 48582fe..74b94aa 100644
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,7 @@
+ 
+ Upload an Excel workbook of backlinks, find out which backlink pages are still live, and download the results. Built for Marketing users, hosted entirely on Cloudflare.
+ 
+-> **Current status: Phase 0 — Project Foundation.** The app deploys and serves a placeholder page plus a health API. See [docs/PHASES.md](docs/PHASES.md) for the roadmap.
++> **Current status: Phase 1 — UI Foundation.** Sign-in, dashboard, new scan (upload page), scan history and settings screens. Scanning arrives in later phases. See [docs/PHASES.md](docs/PHASES.md).
+ 
+ ## Architecture
+ 
+@@ -51,7 +51,8 @@ Requirements: Node.js 22 (see `.nvmrc`), npm, a Cloudflare account.
+ git clone https://github.com/<you>/backlink-health-checker.git
+ cd backlink-health-checker
+ npm install
+-cp .dev.vars.example .dev.vars   # local Worker secrets (empty for Phase 0)
++cp .dev.vars.example .dev.vars   # then edit: your sign-in email, password and a session secret
++npm run secret                   # prints a random SESSION_SECRET to paste into .dev.vars
+ npm run dev                      # http://localhost:5173
+ ```
+ 
+@@ -81,6 +82,18 @@ npm run dev                      # http://localhost:5173
+ | Cloudflare secrets        | Production Worker secrets                       | `npx wrangler secret put NAME` (add `--env staging` for staging) |
+ | GitHub Actions secrets    | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Repo → Settings → Secrets and variables → Actions                |
+ 
++### Sign-in secrets (required from Phase 1)
++
++Each Worker (production **and** staging) needs three secrets. In Cloudflare: **Workers & Pages** → the Worker → **Settings** → **Variables and Secrets** → **Add** → type **Secret**.
++
++| Name             | Value                                        |
++| ---------------- | -------------------------------------------- |
++| `AUTH_EMAIL`     | The email used to sign in                    |
++| `AUTH_PASSWORD`  | The sign-in password (use a strong one)      |
++| `SESSION_SECRET` | 32+ random characters — run `npm run secret` |
++
++Or from the terminal: `npx wrangler secret put AUTH_EMAIL` (add `--env staging` for staging). Secrets survive deploys. Until they are set, the login page says sign-in isn't set up. Phase 3 replaces this single account with a users table.
++
+ **Never commit** `.env`, `.dev.vars`, API keys or tokens. `.gitignore` blocks them and CI fails if one is tracked.
+ 
+ ## Cloudflare setup
+@@ -122,7 +135,7 @@ npm test          # run once
+ npm run test:watch
+ ```
+ 
+-Tests call the Hono app directly (`createApp().request(...)`), so no Worker needs to be running.
++Tests cover sign-in, sessions, CSRF, status labels and upload checks. They call the Hono app directly (`createApp().request(...)`), so no Worker needs to be running.
+ 
+ ## Troubleshooting
+ 
+diff --git a/docs/PHASES.md b/docs/PHASES.md
+index 39d2f5c..42f2758 100644
+--- a/docs/PHASES.md
++++ b/docs/PHASES.md
+@@ -2,22 +2,22 @@
+ 
+ Each phase ends with: tests passing, docs updated, commit, push, deploy, verification. The next phase starts only after sign-off.
+ 
+-| Phase | Scope                                                                     | Status                                       |
+-| ----- | ------------------------------------------------------------------------- | -------------------------------------------- |
+-| 0     | Foundation: repo, TypeScript, lint, tests, Wrangler, CI/CD, blank deploy  | ✅ Built — awaiting your deploy verification |
+-| 1     | UI shell: login, dashboard, sidebar, upload page, history, settings       | ⏳                                           |
+-| 2     | Excel upload: parsing, `Backlinks` detection, validation, dedupe, preview | ⏳                                           |
+-| 3     | D1 database, migrations, scan creation, auth persistence                  | ⏳                                           |
+-| 4     | URL checker + status classification + SSRF protection                     | ⏳                                           |
+-| 5     | Background scanning with Queues, throttling, retries, progress            | ⏳                                           |
+-| 6     | Results dashboard: cards, table, filters, search, sorting                 | ⏳                                           |
+-| 7     | Soft 404 detection with combined signals and reasons                      | ⏳                                           |
+-| 8     | Export to .xlsx / .csv preserving original columns                        | ⏳                                           |
+-| 9     | Backlink presence check against Target URL (HTML parsing)                 | ⏳                                           |
+-| 10    | Rechecking and status-change history                                      | ⏳                                           |
+-| 11    | Scheduled scans via Cron Triggers                                         | ⏳                                           |
+-| 12    | Google Sheets import                                                      | ⏳                                           |
+-| 13    | Production hardening                                                      | ⏳                                           |
++| Phase | Scope                                                                     | Status                       |
++| ----- | ------------------------------------------------------------------------- | ---------------------------- |
++| 0     | Foundation: repo, TypeScript, lint, tests, Wrangler, CI/CD, blank deploy  | ✅ Done — live on Cloudflare |
++| 1     | UI shell: login, dashboard, sidebar, upload page, history, settings       | ⏳                           |
++| 2     | Excel upload: parsing, `Backlinks` detection, validation, dedupe, preview | ⏳                           |
++| 3     | D1 database, migrations, scan creation, auth persistence                  | ⏳                           |
++| 4     | URL checker + status classification + SSRF protection                     | ⏳                           |
++| 5     | Background scanning with Queues, throttling, retries, progress            | ⏳                           |
++| 6     | Results dashboard: cards, table, filters, search, sorting                 | ⏳                           |
++| 7     | Soft 404 detection with combined signals and reasons                      | ⏳                           |
++| 8     | Export to .xlsx / .csv preserving original columns                        | ⏳                           |
++| 9     | Backlink presence check against Target URL (HTML parsing)                 | ⏳                           |
++| 10    | Rechecking and status-change history                                      | ⏳                           |
++| 11    | Scheduled scans via Cron Triggers                                         | ⏳                           |
++| 12    | Google Sheets import                                                      | ⏳                           |
++| 13    | Production hardening                                                      | ⏳                           |
+ 
+ ## Decisions recorded in Phase 0
+ 
+@@ -26,3 +26,17 @@ Each phase ends with: tests passing, docs updated, commit, push, deploy, verific
+ - **Vite + @cloudflare/vite-plugin**: dev server runs the real Workers runtime.
+ - **Staging** is a separate Worker (`env.staging`) with its own resources in later phases, so test data never touches production.
+ - **Free-plan awareness**: Workers Free allows 100k requests/day and limits subrequests per invocation, which is why Phase 5 splits scans into small queue batches.
++
++## Decisions recorded in Phase 1
++
++- **Sign-in is real, not a mock.** One account set by Cloudflare secrets (`AUTH_EMAIL`, `AUTH_PASSWORD`), HMAC-signed `__Host-` session cookie (HttpOnly, Secure, SameSite=Lax, 12 h). Phase 3 moves users into D1 with hashed passwords; the session and CSRF code stay.
++- **CSRF**: every non-GET API request must carry an `Origin` matching the app.
++- **Status model** lives in `src/shared/status.ts`: machine values (`DEAD`) separate from labels ("Dead"). Temporary problems are never styled as dead.
++- **Badges** use colour + icon shape + text, so they work without colour vision.
++- **Font**: Atkinson Hyperlegible Next, self-hosted (no third-party requests), designed for readability.
++- **Upload page** accepts and validates the file (.xlsx, ≤ 10 MB). Reading it is Phase 2.
++
++## Known limits after Phase 1
++
++- No login attempt limiting yet (Phase 3, backed by D1).
++- "Forgot password" tells the user to contact the administrator.
+diff --git a/package-lock.json b/package-lock.json
+index 577e9b1..08c33c8 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -8,9 +8,11 @@
+       "name": "backlink-health-checker",
+       "version": "0.1.0",
+       "dependencies": {
++        "@fontsource/atkinson-hyperlegible-next": "^5.3.0",
+         "hono": "^4.13.9",
+         "react": "^19.3.0",
+-        "react-dom": "^19.3.0"
++        "react-dom": "^19.3.0",
++        "react-router": "^8.4.0"
+       },
+       "devDependencies": {
+         "@cloudflare/vite-plugin": "^1.59.0",
+@@ -1053,6 +1055,15 @@
+         "node": "^20.19.0 || ^22.13.0 || >=24"
+       }
+     },
++    "node_modules/@fontsource/atkinson-hyperlegible-next": {
++      "version": "5.3.0",
++      "resolved": "https://registry.npmjs.org/@fontsource/atkinson-hyperlegible-next/-/atkinson-hyperlegible-next-5.3.0.tgz",
++      "integrity": "sha512-8p1tHVoPDo6oYwSO3sMw5snGwFwSf3TmeSF9Gcj792GXdsg6oqvhoItbj6Hj/XZIk0Xs+Cwu6pkLBAl3Q5HrwA==",
++      "license": "OFL-1.1",
++      "funding": {
++        "url": "https://github.com/sponsors/ayuhito"
++      }
++    },
+     "node_modules/@humanfs/core": {
+       "version": "0.19.2",
+       "resolved": "https://registry.npmjs.org/@humanfs/core/-/core-0.19.2.tgz",
+@@ -1759,6 +1770,12 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/@remix-run/route-pattern": {
++      "version": "0.22.1",
++      "resolved": "https://registry.npmjs.org/@remix-run/route-pattern/-/route-pattern-0.22.1.tgz",
++      "integrity": "sha512-czdGJWh09Lapvcqt7Vb09KlrU2PhRJ8xQaI+AItTuD9aDJ5MAgxnS38lnys6Ll+6RJEqPiaUqTwIQhVLwFvv+w==",
++      "license": "MIT"
++    },
+     "node_modules/@rolldown/binding-android-arm-eabi": {
+       "version": "1.2.10",
+       "resolved": "https://registry.npmjs.org/@rolldown/binding-android-arm-eabi/-/binding-android-arm-eabi-1.2.10.tgz",
+@@ -2614,6 +2631,12 @@
+         "url": "https://opencollective.com/express"
+       }
+     },
++    "node_modules/cookie-es": {
++      "version": "3.1.1",
++      "resolved": "https://registry.npmjs.org/cookie-es/-/cookie-es-3.1.1.tgz",
++      "integrity": "sha512-UaXxwISYJPTr9hwQxMFYZ7kNhSXboMXP+Z3TRX6f1/NyaGPfuNUZOWP1pUEb75B2HjfklIYLVRfWiFZJyC6Npg==",
++      "license": "MIT"
++    },
+     "node_modules/cross-env": {
+       "version": "10.1.0",
+       "resolved": "https://registry.npmjs.org/cross-env/-/cross-env-10.1.0.tgz",
+@@ -3910,6 +3933,28 @@
+         "react": "^19.3.0"
+       }
+     },
++    "node_modules/react-router": {
++      "version": "8.4.0",
++      "resolved": "https://registry.npmjs.org/react-router/-/react-router-8.4.0.tgz",
++      "integrity": "sha512-JtydAkBvU9UTEe5qNC+POhu+ZBNM7rlKY2IegwXc7Idj7xfRG16x5RZrw3mju+XlqBxfvb2ky9P3jUp9WyWC1g==",
++      "license": "MIT",
++      "dependencies": {
++        "@remix-run/route-pattern": "^0.22.1",
++        "cookie-es": "^3.1.1"
++      },
++      "engines": {
++        "node": ">=22.22.0"
++      },
++      "peerDependencies": {
++        "react": ">=19.2.7",
++        "react-dom": ">=19.2.7"
++      },
++      "peerDependenciesMeta": {
++        "react-dom": {
++          "optional": true
++        }
++      }
++    },
+     "node_modules/rolldown": {
+       "version": "1.2.10",
+       "resolved": "https://registry.npmjs.org/rolldown/-/rolldown-1.2.10.tgz",
+diff --git a/package.json b/package.json
+index 9d07cc4..5dbc013 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "backlink-health-checker",
+-  "version": "0.1.0",
++  "version": "0.2.0",
+   "private": true,
+   "type": "module",
+   "description": "Upload a backlink workbook, check which backlink pages are still alive, export the results.",
+@@ -20,12 +20,15 @@
+     "cf-typegen": "wrangler types src/worker/worker-configuration.d.ts",
+     "deploy": "npm run build && wrangler deploy",
+     "deploy:staging": "cross-env CLOUDFLARE_ENV=staging npm run build && wrangler deploy",
+-    "check": "npm run lint && npm run typecheck && npm run test && npm run build"
++    "check": "npm run lint && npm run typecheck && npm run test && npm run build",
++    "secret": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\""
+   },
+   "dependencies": {
++    "@fontsource/atkinson-hyperlegible-next": "^5.3.0",
+     "hono": "^4.13.9",
+     "react": "^19.3.0",
+-    "react-dom": "^19.3.0"
++    "react-dom": "^19.3.0",
++    "react-router": "^8.4.0"
+   },
+   "devDependencies": {
+     "@cloudflare/vite-plugin": "^1.59.0",
+diff --git a/src/client/App.tsx b/src/client/App.tsx
+deleted file mode 100644
+index 9a9a3e1..0000000
+--- a/src/client/App.tsx
++++ /dev/null
+@@ -1,42 +0,0 @@
+-import { useEffect, useState } from 'react';
+-import type { HealthResponse } from '../shared/api';
+-
+-type State = { kind: 'loading' } | { kind: 'ok'; data: HealthResponse } | { kind: 'error' };
+-
+-/**
+- * Phase 0 placeholder. Proves the React app is served by Cloudflare and can
+- * reach the Worker API. Replaced by the real app shell in Phase 1.
+- */
+-export function App() {
+-  const [state, setState] = useState<State>({ kind: 'loading' });
+-
+-  useEffect(() => {
+-    fetch('/api/health')
+-      .then((r) => (r.ok ? (r.json() as Promise<HealthResponse>) : Promise.reject(new Error(String(r.status)))))
+-      .then((data) => setState({ kind: 'ok', data }))
+-      .catch(() => setState({ kind: 'error' }));
+-  }, []);
+-
+-  return (
+-    <main className="shell">
+-      <h1>Backlink Health Checker</h1>
+-      <p className="lead">Upload your backlink sheet and see which links are still alive.</p>
+-
+-      <section className="status" aria-live="polite">
+-        {state.kind === 'loading' && <p>Checking the service…</p>}
+-        {state.kind === 'ok' && (
+-          <p>
+-            <span className="badge badge-ok">Service online</span> {state.data.environment} · v{state.data.version}
+-          </p>
+-        )}
+-        {state.kind === 'error' && (
+-          <p>
+-            <span className="badge badge-error">Service unreachable</span> The app loaded, but the API did not respond.
+-          </p>
+-        )}
+-      </section>
+-
+-      <p className="note">Foundation release. Sign-in and scanning arrive in the next phases.</p>
+-    </main>
+-  );
+-}
+diff --git a/src/client/api/client.ts b/src/client/api/client.ts
+new file mode 100644
+index 0000000..9b5482c
+--- /dev/null
++++ b/src/client/api/client.ts
+@@ -0,0 +1,42 @@
++import type { ApiError } from '../../shared/api';
++
++/** Error with a message that is safe to show to users. */
++export class RequestError extends Error {
++  constructor(
++    message: string,
++    readonly status: number,
++    readonly code: string,
++  ) {
++    super(message);
++  }
++}
++
++const FALLBACK = 'We couldn’t reach the service. Check your connection and try again.';
++
++export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
++  let res: Response;
++  try {
++    res = await fetch(`/api${path}`, {
++      credentials: 'same-origin',
++      ...init,
++      headers: {
++        Accept: 'application/json',
++        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
++        ...init.headers,
++      },
++    });
++  } catch {
++    throw new RequestError(FALLBACK, 0, 'NETWORK');
++  }
++  if (res.ok) return (await res.json()) as T;
++  let message = FALLBACK;
++  let code = 'UNKNOWN';
++  try {
++    const body = (await res.json()) as ApiError;
++    message = body.error.message;
++    code = body.error.code;
++  } catch {
++    /* non-JSON error: keep fallback */
++  }
++  throw new RequestError(message, res.status, code);
++}
+diff --git a/src/client/auth/AuthProvider.tsx b/src/client/auth/AuthProvider.tsx
+new file mode 100644
+index 0000000..3db0e57
+--- /dev/null
++++ b/src/client/auth/AuthProvider.tsx
+@@ -0,0 +1,32 @@
++import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
++import type { MeResponse, SessionUser } from '../../shared/api';
++import { api } from '../api/client';
++import { AuthContext, type AuthState } from './auth-context';
++
++export function AuthProvider({ children }: { children: ReactNode }) {
++  const [user, setUser] = useState<SessionUser | null>(null);
++  const [loading, setLoading] = useState(true);
++
++  useEffect(() => {
++    api<MeResponse>('/auth/me')
++      .then((r) => setUser(r.user))
++      .catch(() => setUser(null))
++      .finally(() => setLoading(false));
++  }, []);
++
++  const signIn = useCallback(async (email: string, password: string) => {
++    const r = await api<MeResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
++    setUser(r.user);
++  }, []);
++
++  const signOut = useCallback(async () => {
++    try {
++      await api('/auth/logout', { method: 'POST' });
++    } finally {
++      setUser(null);
++    }
++  }, []);
++
++  const value = useMemo<AuthState>(() => ({ user, loading, signIn, signOut }), [user, loading, signIn, signOut]);
++  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
++}
+diff --git a/src/client/auth/RequireAuth.tsx b/src/client/auth/RequireAuth.tsx
+new file mode 100644
+index 0000000..6e40242
+--- /dev/null
++++ b/src/client/auth/RequireAuth.tsx
+@@ -0,0 +1,15 @@
++import { Navigate, Outlet, useLocation } from 'react-router';
++import { useAuth } from './auth-context';
++
++export function RequireAuth() {
++  const { user, loading } = useAuth();
++  const location = useLocation();
++  if (loading)
++    return (
++      <div className="page-loading" role="status">
++        Loading…
++      </div>
++    );
++  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
++  return <Outlet />;
++}
+diff --git a/src/client/auth/auth-context.ts b/src/client/auth/auth-context.ts
+new file mode 100644
+index 0000000..32ec133
+--- /dev/null
++++ b/src/client/auth/auth-context.ts
+@@ -0,0 +1,17 @@
++import { createContext, useContext } from 'react';
++import type { SessionUser } from '../../shared/api';
++
++export interface AuthState {
++  user: SessionUser | null;
++  loading: boolean;
++  signIn: (email: string, password: string) => Promise<void>;
++  signOut: () => Promise<void>;
++}
++
++export const AuthContext = createContext<AuthState | null>(null);
++
++export function useAuth(): AuthState {
++  const ctx = useContext(AuthContext);
++  if (!ctx) throw new Error('useAuth must be used inside <AuthProvider>');
++  return ctx;
++}
+diff --git a/src/client/components/AppLayout.tsx b/src/client/components/AppLayout.tsx
+new file mode 100644
+index 0000000..5ef86ac
+--- /dev/null
++++ b/src/client/components/AppLayout.tsx
+@@ -0,0 +1,94 @@
++import { useEffect, useState } from 'react';
++import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
++import { useAuth } from '../auth/auth-context';
++import { Icon, type IconName } from './Icon';
++
++const NAV: { to: string; label: string; icon: IconName; end?: boolean }[] = [
++  { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
++  { to: '/scans/new', label: 'New scan', icon: 'upload' },
++  { to: '/scans', label: 'Scan history', icon: 'history', end: true },
++  { to: '/settings', label: 'Settings', icon: 'settings' },
++];
++
++const TITLES: Record<string, string> = {
++  '/': 'Dashboard',
++  '/scans/new': 'New scan',
++  '/scans': 'Scan history',
++  '/settings': 'Settings',
++};
++
++export function AppLayout() {
++  const { user, signOut } = useAuth();
++  const navigate = useNavigate();
++  const { pathname } = useLocation();
++  const [openFor, setOpenFor] = useState<string | null>(null);
++  const menuOpen = openFor === pathname; // closes itself when the route changes
++  const title = TITLES[pathname] ?? 'Page not found';
++
++  useEffect(() => {
++    document.title = `${title} · Backlink Health Checker`;
++  }, [title]);
++
++  async function handleSignOut() {
++    await signOut();
++    navigate('/login', { replace: true });
++  }
++
++  return (
++    <div className="app">
++      <a className="skip-link" href="#main">
++        Skip to content
++      </a>
++
++      <aside className={`sidebar${menuOpen ? ' is-open' : ''}`} aria-label="Main">
++        <div className="brand">
++          <span className="brand-mark">
++            <Icon name="link" size={20} />
++          </span>
++          <span className="brand-name">Backlink Health Checker</span>
++        </div>
++        <nav aria-label="Main navigation">
++          <ul className="nav-list">
++            {NAV.map((item) => (
++              <li key={item.to}>
++                <NavLink to={item.to} end={item.end} className="nav-link">
++                  <Icon name={item.icon} />
++                  {item.label}
++                </NavLink>
++              </li>
++            ))}
++          </ul>
++        </nav>
++        <button type="button" className="nav-link nav-signout" onClick={handleSignOut}>
++          <Icon name="logout" />
++          Sign out
++        </button>
++      </aside>
++      {menuOpen && <div className="scrim" onClick={() => setOpenFor(null)} aria-hidden="true" />}
++
++      <div className="main-col">
++        <header className="topbar">
++          <button
++            type="button"
++            className="icon-button menu-button"
++            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
++            aria-expanded={menuOpen}
++            onClick={() => setOpenFor(menuOpen ? null : pathname)}
++          >
++            <Icon name={menuOpen ? 'close' : 'menu'} size={22} />
++          </button>
++          <h1 className="page-title">{title}</h1>
++          <div className="user-chip" title={user?.email}>
++            <span className="avatar" aria-hidden="true">
++              {user?.email.charAt(0).toUpperCase()}
++            </span>
++            <span className="user-email">{user?.email}</span>
++          </div>
++        </header>
++        <main id="main" className="content" tabIndex={-1}>
++          <Outlet />
++        </main>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/client/components/FileDrop.tsx b/src/client/components/FileDrop.tsx
+new file mode 100644
+index 0000000..59f3a45
+--- /dev/null
++++ b/src/client/components/FileDrop.tsx
+@@ -0,0 +1,53 @@
++import { useId, useState, type DragEvent, type ReactNode } from 'react';
++import { Icon } from './Icon';
++
++interface Props {
++  onFile: (file: File) => void;
++  variant?: 'page' | 'banner';
++  children: ReactNode;
++}
++
++/** Drag-and-drop area that is also a normal, keyboard-usable file picker. */
++export function FileDrop({ onFile, variant = 'page', children }: Props) {
++  const inputId = useId();
++  const [dragging, setDragging] = useState(false);
++
++  function onDrop(e: DragEvent) {
++    e.preventDefault();
++    setDragging(false);
++    const file = e.dataTransfer.files[0];
++    if (file) onFile(file);
++  }
++
++  return (
++    <div
++      className={`drop drop-${variant}${dragging ? ' is-dragging' : ''}`}
++      onDragOver={(e) => {
++        e.preventDefault();
++        setDragging(true);
++      }}
++      onDragLeave={() => setDragging(false)}
++      onDrop={onDrop}
++    >
++      <span className="drop-icon">
++        <Icon name="upload" size={variant === 'page' ? 36 : 28} />
++      </span>
++      <div className="drop-text">{children}</div>
++      <input
++        id={inputId}
++        className="visually-hidden file-input"
++        type="file"
++        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
++        onChange={(e) => {
++          const file = e.target.files?.[0];
++          if (file) onFile(file);
++          e.target.value = '';
++        }}
++      />
++      {/* Label follows the input so the input's keyboard focus can style it (see .file-input). */}
++      <label htmlFor={inputId} className="button button-primary">
++        Browse files
++      </label>
++    </div>
++  );
++}
+diff --git a/src/client/components/Icon.tsx b/src/client/components/Icon.tsx
+new file mode 100644
+index 0000000..018db68
+--- /dev/null
++++ b/src/client/components/Icon.tsx
+@@ -0,0 +1,42 @@
++/** Small inline icon set (no external requests). Decorative unless labelled. */
++const paths = {
++  dashboard: 'M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z',
++  upload: 'M12 16V4m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3',
++  history: 'M3 12a9 9 0 1 0 3-6.7L3 8m0-5v5h5m4-1v5l3 2',
++  settings:
++    'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7.4 7.4 0 0 0-.1-1.3l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-2.2-1.3L14.3 3h-4l-.4 2.4a7.5 7.5 0 0 0-2.2 1.3l-2.4-1-2 3.4 2 1.6a7.4 7.4 0 0 0 0 2.6l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 2.2 1.3l.4 2.4h4l.4-2.4a7.5 7.5 0 0 0 2.2-1.3l2.4 1 2-3.4-2-1.6c.1-.4.1-.9.1-1.3Z',
++  logout: 'M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5m5 5H3',
++  menu: 'M4 6h16M4 12h16M4 18h16',
++  close: 'M6 6l12 12M18 6 6 18',
++  file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M9 13h6M9 17h6',
++  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1m2 3.7a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
++  // One shape per status tone, so colour is never the only cue.
++  check: 'M5 12.5 10 17 19 7',
++  cross: 'M7 7l10 10M17 7 7 17',
++  alert: 'M12 6v8m0 4v.5',
++  arrow: 'M5 12h13m-5-5 5 5-5 5',
++  dots: 'M6 12h.01M12 12h.01M18 12h.01',
++} as const;
++
++export type IconName = keyof typeof paths;
++
++export function Icon({ name, size = 20, label }: { name: IconName; size?: number; label?: string }) {
++  return (
++    <svg
++      width={size}
++      height={size}
++      viewBox="0 0 24 24"
++      fill="none"
++      stroke="currentColor"
++      strokeWidth={name === 'dots' ? 3.5 : 2}
++      strokeLinecap="round"
++      strokeLinejoin="round"
++      role={label ? 'img' : undefined}
++      aria-label={label}
++      aria-hidden={label ? undefined : true}
++      focusable="false"
++    >
++      <path d={paths[name]} />
++    </svg>
++  );
++}
+diff --git a/src/client/components/StatusBadge.tsx b/src/client/components/StatusBadge.tsx
+new file mode 100644
+index 0000000..86346ad
+--- /dev/null
++++ b/src/client/components/StatusBadge.tsx
+@@ -0,0 +1,24 @@
++import { STATUS_INFO, type LinkStatus, type StatusTone } from '../../shared/status';
++import { Icon, type IconName } from './Icon';
++
++const TONE_ICON: Record<StatusTone, IconName> = {
++  active: 'check',
++  dead: 'cross',
++  review: 'alert',
++  redirected: 'arrow',
++  pending: 'dots',
++};
++
++/**
++ * Status badge: colour + icon shape + text, so it works for colour-blind
++ * users and screen readers. The plain-English description is a tooltip.
++ */
++export function StatusBadge({ status }: { status: LinkStatus }) {
++  const info = STATUS_INFO[status];
++  return (
++    <span className={`badge tone-${info.tone}`} title={info.description}>
++      <Icon name={TONE_ICON[info.tone]} size={14} />
++      {info.label}
++    </span>
++  );
++}
+diff --git a/src/client/lib/file-handoff.ts b/src/client/lib/file-handoff.ts
+new file mode 100644
+index 0000000..ec3f2f8
+--- /dev/null
++++ b/src/client/lib/file-handoff.ts
+@@ -0,0 +1,15 @@
++/**
++ * Lets a file dropped on the Dashboard be picked up by the New Scan page.
++ * (File objects can't travel in the URL, and this avoids a global state library.)
++ */
++let pending: File | null = null;
++
++export function handOffFile(file: File) {
++  pending = file;
++}
++
++export function takeHandedOffFile(): File | null {
++  const f = pending;
++  pending = null;
++  return f;
++}
+diff --git a/src/client/lib/format.ts b/src/client/lib/format.ts
+new file mode 100644
+index 0000000..66bed5c
+--- /dev/null
++++ b/src/client/lib/format.ts
+@@ -0,0 +1,16 @@
++export const formatNumber = (n: number) => new Intl.NumberFormat('en-GB').format(n);
++
++export function formatBytes(bytes: number): string {
++  if (bytes < 1024) return `${bytes} B`;
++  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
++  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
++}
++
++export const formatDate = (iso: string) =>
++  new Intl.DateTimeFormat('en-GB', {
++    day: 'numeric',
++    month: 'short',
++    year: 'numeric',
++    hour: '2-digit',
++    minute: '2-digit',
++  }).format(new Date(iso));
+diff --git a/src/client/lib/upload-rules.ts b/src/client/lib/upload-rules.ts
+new file mode 100644
+index 0000000..c5dc48b
+--- /dev/null
++++ b/src/client/lib/upload-rules.ts
+@@ -0,0 +1,13 @@
++export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
++
++/** Returns a friendly error, or null if the file can be used. */
++export function checkUploadFile(file: { name: string; size: number }): string | null {
++  if (!file.name.toLowerCase().endsWith('.xlsx')) {
++    return 'This file isn’t an Excel workbook (.xlsx). Save it as .xlsx in Excel and upload it again.';
++  }
++  if (file.size === 0) return 'This file is empty. Choose another file.';
++  if (file.size > MAX_UPLOAD_BYTES) {
++    return 'This file is larger than 10 MB. Split it into smaller files and upload them one at a time.';
++  }
++  return null;
++}
+diff --git a/src/client/main.tsx b/src/client/main.tsx
+index 2df9a20..64d7a99 100644
+--- a/src/client/main.tsx
++++ b/src/client/main.tsx
+@@ -1,6 +1,11 @@
+ import { StrictMode } from 'react';
+ import { createRoot } from 'react-dom/client';
+-import { App } from './App';
++import { RouterProvider } from 'react-router/dom';
++import '@fontsource/atkinson-hyperlegible-next/400.css';
++import '@fontsource/atkinson-hyperlegible-next/600.css';
++import '@fontsource/atkinson-hyperlegible-next/700.css';
++import { AuthProvider } from './auth/AuthProvider';
++import { router } from './router';
+ import './styles.css';
+ 
+ const root = document.getElementById('root');
+@@ -8,6 +13,8 @@ if (!root) throw new Error('Root element #root not found');
+ 
+ createRoot(root).render(
+   <StrictMode>
+-    <App />
++    <AuthProvider>
++      <RouterProvider router={router} />
++    </AuthProvider>
+   </StrictMode>,
+ );
+diff --git a/src/client/pages/DashboardPage.tsx b/src/client/pages/DashboardPage.tsx
+new file mode 100644
+index 0000000..6a866de
+--- /dev/null
++++ b/src/client/pages/DashboardPage.tsx
+@@ -0,0 +1,105 @@
++import { useEffect, useState } from 'react';
++import { Link, useNavigate } from 'react-router';
++import type { DashboardSummary } from '../../shared/api';
++import { api, RequestError } from '../api/client';
++import { useAuth } from '../auth/auth-context';
++import { FileDrop } from '../components/FileDrop';
++import { handOffFile } from '../lib/file-handoff';
++import { formatDate, formatNumber } from '../lib/format';
++
++function firstName(email: string) {
++  const part = email.split('@')[0]?.split(/[._-]/)[0] ?? '';
++  return part ? part.charAt(0).toUpperCase() + part.slice(1) : 'there';
++}
++
++export function DashboardPage() {
++  const { user } = useAuth();
++  const navigate = useNavigate();
++  const [data, setData] = useState<DashboardSummary | null>(null);
++  const [error, setError] = useState<string | null>(null);
++
++  useEffect(() => {
++    api<DashboardSummary>('/dashboard')
++      .then(setData)
++      .catch((e) => setError(e instanceof RequestError ? e.message : 'Couldn’t load your dashboard.'));
++  }, []);
++
++  const stats: { label: string; value: number; tone?: string }[] = data
++    ? [
++        { label: 'Scans run', value: data.totalScans },
++        { label: 'Links checked', value: data.urlsChecked },
++        { label: 'Active links', value: data.activeLinks, tone: 'active' },
++        { label: 'Dead links', value: data.deadLinks, tone: 'dead' },
++        { label: 'Need a look', value: data.issuesFound, tone: 'review' },
++      ]
++    : [];
++
++  return (
++    <div className="stack-lg">
++      <p className="greeting">Hello {user ? firstName(user.email) : 'there'}. Ready to check your backlinks?</p>
++
++      <FileDrop
++        variant="banner"
++        onFile={(f) => {
++          handOffFile(f);
++          navigate('/scans/new');
++        }}
++      >
++        <p className="drop-title">Upload backlink Excel</p>
++        <p className="drop-sub">Drop your .xlsx file here. We’ll find the “Backlinks” column for you.</p>
++      </FileDrop>
++
++      {error && (
++        <p className="notice notice-error" role="alert">
++          {error}
++        </p>
++      )}
++
++      {data && (
++        <section aria-labelledby="totals-heading">
++          <h2 id="totals-heading" className="section-title">
++            Your totals
++          </h2>
++          <dl className="stat-strip">
++            {stats.map((s) => (
++              <div key={s.label} className={`stat${s.tone ? ` stat-${s.tone}` : ''}`}>
++                <dt>{s.label}</dt>
++                <dd>{formatNumber(s.value)}</dd>
++              </div>
++            ))}
++          </dl>
++        </section>
++      )}
++
++      {data && (
++        <section aria-labelledby="recent-heading">
++          <div className="section-head">
++            <h2 id="recent-heading" className="section-title">
++              Recent scans
++            </h2>
++            {data.recentScans.length > 0 && <Link to="/scans">See all scans</Link>}
++          </div>
++          {data.recentScans.length === 0 ? (
++            <div className="empty">
++              <p className="empty-title">No scans yet</p>
++              <p>Your first scan will appear here. Upload a backlink sheet to start.</p>
++              <Link to="/scans/new" className="button button-secondary">
++                Start a new scan
++              </Link>
++            </div>
++          ) : (
++            <ul className="recent-list">
++              {data.recentScans.map((s) => (
++                <li key={s.id}>
++                  <span className="recent-name">{s.fileName}</span>
++                  <span className="recent-date">{formatDate(s.createdAt)}</span>
++                  <span>{formatNumber(s.urlsChecked)} links</span>
++                </li>
++              ))}
++            </ul>
++          )}
++        </section>
++      )}
++    </div>
++  );
++}
+diff --git a/src/client/pages/LoginPage.tsx b/src/client/pages/LoginPage.tsx
+new file mode 100644
+index 0000000..44af6e3
+--- /dev/null
++++ b/src/client/pages/LoginPage.tsx
+@@ -0,0 +1,100 @@
++import { useEffect, useState, type FormEvent } from 'react';
++import { Navigate, useLocation, useNavigate } from 'react-router';
++import { useAuth } from '../auth/auth-context';
++import { RequestError } from '../api/client';
++import { Icon } from '../components/Icon';
++
++export function LoginPage() {
++  const { user, signIn } = useAuth();
++  const navigate = useNavigate();
++  const location = useLocation();
++  const from = (location.state as { from?: string } | null)?.from ?? '/';
++
++  const [email, setEmail] = useState('');
++  const [password, setPassword] = useState('');
++  const [error, setError] = useState<string | null>(null);
++  const [submitting, setSubmitting] = useState(false);
++  const [showReset, setShowReset] = useState(false);
++
++  useEffect(() => {
++    document.title = 'Sign in · Backlink Health Checker';
++  }, []);
++
++  if (user) return <Navigate to={from} replace />;
++
++  async function onSubmit(e: FormEvent) {
++    e.preventDefault();
++    if (!email.trim() || !password) {
++      setError('Enter your email and password.');
++      return;
++    }
++    setSubmitting(true);
++    setError(null);
++    try {
++      await signIn(email, password);
++      navigate(from, { replace: true });
++    } catch (err) {
++      setError(err instanceof RequestError ? err.message : 'Sign-in failed. Try again.');
++    } finally {
++      setSubmitting(false);
++    }
++  }
++
++  return (
++    <div className="login">
++      <div className="login-intro">
++        <span className="brand-mark brand-mark-large">
++          <Icon name="link" size={28} />
++        </span>
++        <h1 className="login-title">Backlink Health Checker</h1>
++        <p className="login-lead">
++          Upload your backlink sheet. We open every link for you and tell you which ones still work.
++        </p>
++      </div>
++
++      <form className="login-card" onSubmit={onSubmit} noValidate>
++        <h2 className="login-card-title">Sign in</h2>
++
++        {error && (
++          <p className="form-error" role="alert">
++            {error}
++          </p>
++        )}
++
++        <div className="field">
++          <label htmlFor="email">Email</label>
++          <input
++            id="email"
++            type="email"
++            autoComplete="username"
++            value={email}
++            onChange={(e) => setEmail(e.target.value)}
++            required
++          />
++        </div>
++        <div className="field">
++          <label htmlFor="password">Password</label>
++          <input
++            id="password"
++            type="password"
++            autoComplete="current-password"
++            value={password}
++            onChange={(e) => setPassword(e.target.value)}
++            required
++          />
++        </div>
++
++        <button type="submit" className="button button-primary button-block" disabled={submitting}>
++          {submitting ? 'Signing in…' : 'Sign in'}
++        </button>
++
++        <button type="button" className="link-button" onClick={() => setShowReset((s) => !s)} aria-expanded={showReset}>
++          Forgot password?
++        </button>
++        {showReset && (
++          <p className="form-hint">Ask your administrator to reset your password. Self-service reset is coming soon.</p>
++        )}
++      </form>
++    </div>
++  );
++}
+diff --git a/src/client/pages/NewScanPage.tsx b/src/client/pages/NewScanPage.tsx
+new file mode 100644
+index 0000000..0d7c4e0
+--- /dev/null
++++ b/src/client/pages/NewScanPage.tsx
+@@ -0,0 +1,103 @@
++import { useState } from 'react';
++import { FileDrop } from '../components/FileDrop';
++import { Icon } from '../components/Icon';
++import { takeHandedOffFile } from '../lib/file-handoff';
++import { formatBytes } from '../lib/format';
++import { checkUploadFile } from '../lib/upload-rules';
++
++function initialState(): { file: File | null; error: string | null } {
++  const f = takeHandedOffFile();
++  if (!f) return { file: null, error: null };
++  const err = checkUploadFile(f);
++  return err ? { file: null, error: err } : { file: f, error: null };
++}
++
++export function NewScanPage() {
++  const [{ file, error }, setState] = useState(initialState);
++
++  function choose(f: File) {
++    const err = checkUploadFile(f);
++    setState(err ? { file: null, error: err } : { file: f, error: null });
++  }
++
++  return (
++    <div className="stack-lg narrow">
++      <ol className="steps" aria-label="How it works">
++        {['Upload your sheet', 'Check what we found', 'Start the scan'].map((label, i) => {
++          const current = (file ? 1 : 0) === i;
++          return (
++            <li
++              key={label}
++              className={current ? 'is-current' : i < (file ? 1 : 0) ? 'is-done' : undefined}
++              aria-current={current ? 'step' : undefined}
++            >
++              {label}
++            </li>
++          );
++        })}
++      </ol>
++
++      {!file && (
++        <FileDrop onFile={choose}>
++          <p className="drop-title">Upload your backlink sheet</p>
++          <p className="drop-sub">Drag your Excel file here, or browse for it.</p>
++          <p className="drop-meta">Excel workbook (.xlsx), up to 10 MB. Needs a column called “Backlinks”.</p>
++        </FileDrop>
++      )}
++
++      {error && (
++        <p className="notice notice-error" role="alert">
++          {error}
++        </p>
++      )}
++
++      {file && (
++        <section className="file-card" aria-label="Selected file">
++          <span className="file-card-icon">
++            <Icon name="file" size={28} />
++          </span>
++          <div className="file-card-body">
++            <p className="file-name">{file.name}</p>
++            <p className="file-size">{formatBytes(file.size)}</p>
++            <dl className="file-facts">
++              <div>
++                <dt>Worksheets</dt>
++                <dd>Read in the next update</dd>
++              </div>
++              <div>
++                <dt>Backlinks found</dt>
++                <dd>Read in the next update</dd>
++              </div>
++            </dl>
++          </div>
++          <div className="file-card-actions">
++            <button type="button" className="button button-primary" disabled aria-describedby="start-hint">
++              Start scan
++            </button>
++            <button type="button" className="button button-quiet" onClick={() => setState({ file: null, error: null })}>
++              Choose a different file
++            </button>
++          </div>
++          <p id="start-hint" className="form-hint file-card-hint">
++            Scanning is being built. This page is ready so you can try the upload.
++          </p>
++        </section>
++      )}
++
++      <section className="help" aria-labelledby="sheet-help">
++        <h2 id="sheet-help" className="section-title">
++          Getting your sheet ready
++        </h2>
++        <ul>
++          <li>
++            Put your backlink page addresses in a column headed <strong>Backlinks</strong>. Capitals and spaces don’t
++            matter.
++          </li>
++          <li>You can have several worksheets. We look through all of them.</li>
++          <li>Other columns, like Target URL or Anchor Text, are kept and added to your results.</li>
++          <li>Blank rows and repeated links are handled for you.</li>
++        </ul>
++      </section>
++    </div>
++  );
++}
+diff --git a/src/client/pages/NotFoundPage.tsx b/src/client/pages/NotFoundPage.tsx
+new file mode 100644
+index 0000000..cab44ce
+--- /dev/null
++++ b/src/client/pages/NotFoundPage.tsx
+@@ -0,0 +1,13 @@
++import { Link } from 'react-router';
++
++export function NotFoundPage() {
++  return (
++    <div className="empty">
++      <p className="empty-title">This page doesn’t exist</p>
++      <p>The address may be mistyped, or the page may have moved.</p>
++      <Link to="/" className="button button-secondary">
++        Go to the dashboard
++      </Link>
++    </div>
++  );
++}
+diff --git a/src/client/pages/ScanHistoryPage.tsx b/src/client/pages/ScanHistoryPage.tsx
+new file mode 100644
+index 0000000..bb4bbc5
+--- /dev/null
++++ b/src/client/pages/ScanHistoryPage.tsx
+@@ -0,0 +1,70 @@
++import { Link } from 'react-router';
++import { LINK_STATUSES, STATUS_INFO } from '../../shared/status';
++import { StatusBadge } from '../components/StatusBadge';
++
++// Statuses users will actually see in results (PENDING/CHECKING are in-progress states).
++const GUIDE = LINK_STATUSES.filter((s) => s !== 'CHECKING');
++
++export function ScanHistoryPage() {
++  return (
++    <div className="stack-lg">
++      <section aria-labelledby="history-heading">
++        <h2 id="history-heading" className="visually-hidden">
++          Your scans
++        </h2>
++        <div className="table-wrap">
++          <table className="table">
++            <thead>
++              <tr>
++                <th scope="col">File name</th>
++                <th scope="col">Scan date</th>
++                <th scope="col" className="num">
++                  Links checked
++                </th>
++                <th scope="col" className="num">
++                  Active
++                </th>
++                <th scope="col" className="num">
++                  Dead
++                </th>
++                <th scope="col" className="num">
++                  Need a look
++                </th>
++                <th scope="col">Status</th>
++              </tr>
++            </thead>
++            <tbody>
++              <tr>
++                <td colSpan={7}>
++                  <div className="empty empty-inline">
++                    <p className="empty-title">No scans yet</p>
++                    <p>Scans you run are saved here, so you can open or download them later.</p>
++                    <Link to="/scans/new" className="button button-secondary">
++                      Start a new scan
++                    </Link>
++                  </div>
++                </td>
++              </tr>
++            </tbody>
++          </table>
++        </div>
++      </section>
++
++      <section aria-labelledby="guide-heading">
++        <h2 id="guide-heading" className="section-title">
++          What the results mean
++        </h2>
++        <dl className="status-guide">
++          {GUIDE.map((s) => (
++            <div key={s}>
++              <dt>
++                <StatusBadge status={s} />
++              </dt>
++              <dd>{STATUS_INFO[s].description}</dd>
++            </div>
++          ))}
++        </dl>
++      </section>
++    </div>
++  );
++}
+diff --git a/src/client/pages/SettingsPage.tsx b/src/client/pages/SettingsPage.tsx
+new file mode 100644
+index 0000000..f758a46
+--- /dev/null
++++ b/src/client/pages/SettingsPage.tsx
+@@ -0,0 +1,63 @@
++import { useEffect, useState } from 'react';
++import { useNavigate } from 'react-router';
++import type { HealthResponse } from '../../shared/api';
++import { api } from '../api/client';
++import { useAuth } from '../auth/auth-context';
++
++export function SettingsPage() {
++  const { user, signOut } = useAuth();
++  const navigate = useNavigate();
++  const [health, setHealth] = useState<HealthResponse | null>(null);
++
++  useEffect(() => {
++    api<HealthResponse>('/health')
++      .then(setHealth)
++      .catch(() => setHealth(null));
++  }, []);
++
++  return (
++    <div className="stack-lg narrow">
++      <section className="panel" aria-labelledby="account-heading">
++        <h2 id="account-heading" className="section-title">
++          Your account
++        </h2>
++        <dl className="kv">
++          <div>
++            <dt>Email</dt>
++            <dd>{user?.email}</dd>
++          </div>
++          <div>
++            <dt>Password</dt>
++            <dd>Ask your administrator to change it.</dd>
++          </div>
++        </dl>
++        <button
++          type="button"
++          className="button button-secondary"
++          onClick={async () => {
++            await signOut();
++            navigate('/login', { replace: true });
++          }}
++        >
++          Sign out
++        </button>
++      </section>
++
++      <section className="panel" aria-labelledby="about-heading">
++        <h2 id="about-heading" className="section-title">
++          About this app
++        </h2>
++        <dl className="kv">
++          <div>
++            <dt>Version</dt>
++            <dd>{health?.version ?? '—'}</dd>
++          </div>
++          <div>
++            <dt>Environment</dt>
++            <dd>{health?.environment ?? '—'}</dd>
++          </div>
++        </dl>
++      </section>
++    </div>
++  );
++}
+diff --git a/src/client/router.tsx b/src/client/router.tsx
+new file mode 100644
+index 0000000..31b11da
+--- /dev/null
++++ b/src/client/router.tsx
+@@ -0,0 +1,28 @@
++import { createBrowserRouter } from 'react-router';
++import { RequireAuth } from './auth/RequireAuth';
++import { AppLayout } from './components/AppLayout';
++import { LoginPage } from './pages/LoginPage';
++import { DashboardPage } from './pages/DashboardPage';
++import { NewScanPage } from './pages/NewScanPage';
++import { ScanHistoryPage } from './pages/ScanHistoryPage';
++import { SettingsPage } from './pages/SettingsPage';
++import { NotFoundPage } from './pages/NotFoundPage';
++
++export const router = createBrowserRouter([
++  { path: '/login', element: <LoginPage /> },
++  {
++    element: <RequireAuth />,
++    children: [
++      {
++        element: <AppLayout />,
++        children: [
++          { index: true, element: <DashboardPage /> },
++          { path: 'scans/new', element: <NewScanPage /> },
++          { path: 'scans', element: <ScanHistoryPage /> },
++          { path: 'settings', element: <SettingsPage /> },
++          { path: '*', element: <NotFoundPage /> },
++        ],
++      },
++    ],
++  },
++]);
+diff --git a/src/client/styles.css b/src/client/styles.css
+index 5a5f9f5..d20d09e 100644
+--- a/src/client/styles.css
++++ b/src/client/styles.css
+@@ -1,66 +1,812 @@
++/*
++ * Design tokens
++ * Harbor teal carries the brand; status colours are reserved for link
++ * results so they always mean the same thing. Type is Atkinson Hyperlegible
++ * Next, designed for readability — chosen for non-technical users.
++ */
+ :root {
+-  --ink: #17252b;
+-  --muted: #5a6b72;
+-  --surface: #f6f8f8;
+-  --brand: #1f4e5f;
+-  --ok-bg: #e3f4ea;
+-  --ok-ink: #14532d;
+-  --err-bg: #fdecea;
+-  --err-ink: #8a1c12;
++  --ink: #15242b;
++  --ink-soft: #4f6068;
++  --paper: #f3f5f4;
++  --panel: #ffffff;
++  --line: #d6dfe1;
++  --harbor: #1c5160;
++  --harbor-deep: #123843;
++  --harbor-tint: #e2edef;
++  --focus: #2f7de1;
++
++  --active: #15663c;
++  --active-bg: #e0f2e7;
++  --dead: #a3241b;
++  --dead-bg: #fbe5e2;
++  --review: #874700;
++  --review-bg: #fdeed8;
++  --redirected: #5a3793;
++  --redirected-bg: #eee7f9;
++  --pending: #4b5a61;
++  --pending-bg: #e9eeef;
++
++  --radius-s: 6px;
++  --radius-m: 10px;
++  --sidebar-w: 248px;
++
+   font-family:
++    'Atkinson Hyperlegible Next',
+     system-ui,
+     -apple-system,
+     'Segoe UI',
+     Roboto,
+     sans-serif;
++  font-size: 16px;
++  line-height: 1.5;
+   color: var(--ink);
+-  background: var(--surface);
++  background: var(--paper);
++  -webkit-font-smoothing: antialiased;
++}
++
++*,
++*::before,
++*::after {
++  box-sizing: border-box;
+ }
+ body {
+   margin: 0;
+ }
+-.shell {
+-  max-width: 40rem;
+-  margin: 0 auto;
+-  padding: 4rem 1.5rem;
++h1,
++h2,
++p,
++ul,
++ol,
++dl,
++dd {
++  margin: 0;
+ }
+-h1 {
+-  color: var(--brand);
+-  font-size: 2rem;
+-  margin: 0 0 0.5rem;
++a {
++  color: var(--harbor);
++  font-weight: 600;
++}
++a:hover {
++  color: var(--harbor-deep);
++}
++:focus-visible {
++  outline: 3px solid var(--focus);
++  outline-offset: 2px;
++}
++@media (prefers-reduced-motion: reduce) {
++  * {
++    transition: none !important;
++    animation: none !important;
++  }
++}
++
++.visually-hidden {
++  position: absolute !important;
++  width: 1px;
++  height: 1px;
++  overflow: hidden;
++  clip: rect(0 0 0 0);
++  white-space: nowrap;
++}
++.skip-link {
++  position: absolute;
++  left: 1rem;
++  top: -4rem;
++  z-index: 100;
++  background: var(--panel);
++  padding: 0.5rem 1rem;
++  border-radius: var(--radius-s);
++}
++.skip-link:focus {
++  top: 1rem;
++}
++
++/* ---------- Buttons ---------- */
++.button {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 0.5rem;
++  min-height: 48px;
++  padding: 0 1.4rem;
++  border-radius: var(--radius-s);
++  border: 2px solid transparent;
++  font: inherit;
++  font-weight: 700;
++  font-size: 1rem;
++  text-decoration: none;
++  cursor: pointer;
++  white-space: nowrap;
++}
++.button-primary {
++  background: var(--harbor);
++  color: #fff;
++}
++.button-primary:hover {
++  background: var(--harbor-deep);
++  color: #fff;
++}
++.button-secondary {
++  background: var(--panel);
++  color: var(--harbor);
++  border-color: var(--harbor);
++}
++.button-secondary:hover {
++  background: var(--harbor-tint);
++}
++.button-quiet {
++  background: transparent;
++  color: var(--ink-soft);
++  font-weight: 600;
++}
++.button-quiet:hover {
++  color: var(--ink);
++}
++.button:disabled {
++  background: var(--pending-bg);
++  color: var(--pending);
++  border-color: transparent;
++  cursor: not-allowed;
++}
++.button-block {
++  width: 100%;
++}
++.link-button {
++  background: none;
++  border: 0;
++  padding: 0.25rem 0;
++  font: inherit;
++  font-weight: 600;
++  color: var(--harbor);
++  text-decoration: underline;
++  cursor: pointer;
++  align-self: flex-start;
++}
++.icon-button {
++  display: inline-grid;
++  place-items: center;
++  width: 44px;
++  height: 44px;
++  border: 0;
++  border-radius: var(--radius-s);
++  background: transparent;
++  color: var(--ink);
++  cursor: pointer;
++}
++.file-input:focus-visible + label {
++  outline: 3px solid var(--focus);
++  outline-offset: 2px;
++}
++
++/* ---------- App shell ---------- */
++.app {
++  min-height: 100vh;
++  display: grid;
++  grid-template-columns: var(--sidebar-w) 1fr;
++}
++.sidebar {
++  background: var(--harbor-deep);
++  color: #dbe7ea;
++  display: flex;
++  flex-direction: column;
++  padding: 1.25rem 0.9rem;
++  position: sticky;
++  top: 0;
++  height: 100vh;
++}
++.brand {
++  display: flex;
++  align-items: center;
++  gap: 0.7rem;
++  padding: 0 0.5rem 1.5rem;
++}
++.brand-mark {
++  display: inline-grid;
++  place-items: center;
++  width: 36px;
++  height: 36px;
++  border-radius: var(--radius-s);
++  background: #2d7385;
++  color: #fff;
++  flex: none;
++}
++.brand-name {
++  color: #fff;
++  font-weight: 700;
++  line-height: 1.2;
++}
++.nav-list {
++  list-style: none;
++  padding: 0;
++  display: grid;
++  gap: 0.25rem;
++}
++.nav-link {
++  display: flex;
++  align-items: center;
++  gap: 0.75rem;
++  min-height: 46px;
++  padding: 0 0.75rem;
++  border-radius: var(--radius-s);
++  color: #cfdde1;
++  text-decoration: none;
++  font-weight: 600;
++  font: inherit;
++  font-weight: 600;
++  background: none;
++  border: 0;
++  width: 100%;
++  cursor: pointer;
++  text-align: left;
+ }
+-.lead {
+-  font-size: 1.125rem;
+-  color: var(--muted);
+-  margin: 0 0 2rem;
++.nav-link:hover {
++  background: rgba(255, 255, 255, 0.08);
++  color: #fff;
+ }
+-.status {
+-  padding: 1rem 1.25rem;
++.nav-link.active {
+   background: #fff;
+-  border: 1px solid #dde4e6;
+-  border-radius: 8px;
++  color: var(--harbor-deep);
++}
++.nav-signout {
++  margin-top: auto;
++}
++
++.main-col {
++  min-width: 0;
++  display: flex;
++  flex-direction: column;
++}
++.topbar {
++  display: flex;
++  align-items: center;
++  gap: 1rem;
++  padding: 1.1rem 2.5rem;
++  border-bottom: 1px solid var(--line);
++  background: var(--panel);
++}
++.menu-button {
++  display: none;
++}
++.page-title {
++  font-size: 1.5rem;
++  font-weight: 700;
++  line-height: 1.2;
++}
++.user-chip {
++  margin-left: auto;
++  display: flex;
++  align-items: center;
++  gap: 0.6rem;
++  min-width: 0;
++  color: var(--ink-soft);
++}
++.avatar {
++  display: inline-grid;
++  place-items: center;
++  width: 34px;
++  height: 34px;
++  border-radius: 50%;
++  background: var(--harbor-tint);
++  color: var(--harbor);
++  font-weight: 700;
++  flex: none;
++}
++.user-email {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++.content {
++  padding: 2rem 2.5rem 4rem;
++  max-width: 1120px;
++  width: 100%;
++}
++.content:focus {
++  outline: none;
++}
++.page-loading {
++  padding: 3rem;
++  color: var(--ink-soft);
++}
++
++/* ---------- Layout helpers ---------- */
++.stack-lg {
++  display: grid;
++  gap: 2rem;
++}
++.narrow {
++  max-width: 760px;
++}
++.section-title {
++  font-size: 1.15rem;
++  font-weight: 700;
++  margin-bottom: 0.75rem;
++}
++.section-head {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: 1rem;
++}
++.panel {
++  background: var(--panel);
++  border: 1px solid var(--line);
++  border-radius: var(--radius-m);
++  padding: 1.5rem;
++  display: grid;
++  gap: 1rem;
++  justify-items: start;
+ }
+-.status p {
++.panel .section-title {
+   margin: 0;
+ }
++.greeting {
++  font-size: 1.35rem;
++  font-weight: 600;
++}
++
++/* ---------- Drop zone ---------- */
++.drop {
++  border: 2px dashed #8fb1ba;
++  background: var(--harbor-tint);
++  border-radius: var(--radius-m);
++  transition:
++    background 0.15s,
++    border-color 0.15s;
++}
++.drop.is-dragging {
++  border-color: var(--harbor);
++  border-style: solid;
++  background: #cfe2e6;
++}
++.drop-page {
++  display: grid;
++  justify-items: center;
++  text-align: center;
++  gap: 1rem;
++  padding: 3.5rem 1.5rem;
++}
++/* Dashboard: one wide band, text left, action right. */
++.drop-banner {
++  display: grid;
++  grid-template-columns: auto 1fr auto;
++  align-items: center;
++  gap: 1.25rem;
++  padding: 1.75rem 2rem;
++}
++.drop-icon {
++  display: inline-grid;
++  place-items: center;
++  width: 64px;
++  height: 64px;
++  border-radius: 50%;
++  background: var(--panel);
++  color: var(--harbor);
++}
++.drop-banner .drop-icon {
++  width: 56px;
++  height: 56px;
++}
++.drop-title {
++  font-size: 1.3rem;
++  font-weight: 700;
++}
++.drop-sub {
++  color: var(--ink-soft);
++}
++.drop-meta {
++  color: var(--ink-soft);
++  font-size: 0.9rem;
++  margin-top: 0.4rem;
++}
++
++/* ---------- Stats ---------- */
++.stat-strip {
++  display: grid;
++  grid-template-columns: repeat(5, 1fr);
++  background: var(--panel);
++  border: 1px solid var(--line);
++  border-radius: var(--radius-m);
++}
++.stat {
++  padding: 1.1rem 1.25rem;
++  border-left: 1px solid var(--line);
++}
++.stat:first-child {
++  border-left: 0;
++}
++.stat dt {
++  color: var(--ink-soft);
++  font-size: 0.95rem;
++}
++.stat dd {
++  font-size: 2rem;
++  font-weight: 700;
++  line-height: 1.2;
++  font-variant-numeric: tabular-nums;
++}
++.stat-active dd {
++  color: var(--active);
++}
++.stat-dead dd {
++  color: var(--dead);
++}
++.stat-review dd {
++  color: var(--review);
++}
++
++/* ---------- Empty states ---------- */
++.empty {
++  background: var(--panel);
++  border: 1px solid var(--line);
++  border-radius: var(--radius-m);
++  padding: 2.5rem 1.5rem;
++  display: grid;
++  justify-items: center;
++  text-align: center;
++  gap: 0.6rem;
++  color: var(--ink-soft);
++}
++.empty .button {
++  margin-top: 0.6rem;
++}
++.empty-inline {
++  border: 0;
++  background: none;
++}
++.empty-title {
++  color: var(--ink);
++  font-weight: 700;
++  font-size: 1.1rem;
++}
++
++/* ---------- Status badges ---------- */
+ .badge {
+-  display: inline-block;
+-  padding: 0.15rem 0.6rem;
++  display: inline-flex;
++  align-items: center;
++  gap: 0.35rem;
++  padding: 0.2rem 0.65rem 0.2rem 0.5rem;
+   border-radius: 999px;
+-  font-weight: 600;
+   font-size: 0.875rem;
+-  margin-right: 0.5rem;
++  font-weight: 700;
++  white-space: nowrap;
++  border: 1px solid currentColor;
++}
++.tone-active {
++  color: var(--active);
++  background: var(--active-bg);
++}
++.tone-dead {
++  color: var(--dead);
++  background: var(--dead-bg);
++}
++.tone-review {
++  color: var(--review);
++  background: var(--review-bg);
++}
++.tone-redirected {
++  color: var(--redirected);
++  background: var(--redirected-bg);
++}
++.tone-pending {
++  color: var(--pending);
++  background: var(--pending-bg);
++}
++.status-guide {
++  display: grid;
++  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
++  gap: 0.9rem 2rem;
++}
++.status-guide > div {
++  display: grid;
++  align-content: start;
++  gap: 0.3rem;
++  justify-items: start;
+ }
+-.badge-ok {
+-  background: var(--ok-bg);
+-  color: var(--ok-ink);
++.status-guide dd {
++  color: var(--ink-soft);
+ }
+-.badge-error {
+-  background: var(--err-bg);
+-  color: var(--err-ink);
++
++/* ---------- Table ---------- */
++.table-wrap {
++  overflow-x: auto;
++  background: var(--panel);
++  border: 1px solid var(--line);
++  border-radius: var(--radius-m);
+ }
+-.note {
+-  color: var(--muted);
++.table {
++  width: 100%;
++  border-collapse: collapse;
++}
++.table th,
++.table td {
++  padding: 0.8rem 1rem;
++  text-align: left;
++  border-bottom: 1px solid var(--line);
++}
++.table th {
+   font-size: 0.9rem;
+-  margin-top: 2rem;
++  color: var(--ink-soft);
++  font-weight: 600;
++  background: #f8faf9;
++}
++.table .num {
++  text-align: right;
++}
++.table tbody tr:last-child td {
++  border-bottom: 0;
++}
++
++/* ---------- New scan ---------- */
++.steps {
++  list-style: none;
++  padding: 0;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem 1.5rem;
++  counter-reset: step;
++  color: var(--ink-soft);
++}
++.steps li {
++  counter-increment: step;
++  display: flex;
++  align-items: center;
++  gap: 0.5rem;
++}
++.steps li::before {
++  content: counter(step);
++  display: inline-grid;
++  place-items: center;
++  width: 26px;
++  height: 26px;
++  border-radius: 50%;
++  border: 2px solid var(--line);
++  font-weight: 700;
++  font-size: 0.85rem;
++}
++.steps li.is-current {
++  color: var(--ink);
++  font-weight: 700;
++}
++.steps li.is-current::before {
++  background: var(--harbor);
++  border-color: var(--harbor);
++  color: #fff;
++}
++.file-card {
++  background: var(--panel);
++  border: 1px solid var(--line);
++  border-radius: var(--radius-m);
++  padding: 1.5rem;
++  display: grid;
++  grid-template-columns: auto 1fr;
++  gap: 1rem 1.25rem;
++}
++.file-card-icon {
++  color: var(--harbor);
++}
++.file-name {
++  font-weight: 700;
++  font-size: 1.1rem;
++  word-break: break-all;
++}
++.file-size {
++  color: var(--ink-soft);
++}
++.file-facts {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem 2rem;
++  margin-top: 0.75rem;
++}
++.file-facts dt {
++  font-size: 0.9rem;
++  color: var(--ink-soft);
++}
++.file-facts dd {
++  font-weight: 600;
++}
++.file-card-actions {
++  grid-column: 1 / -1;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.75rem;
++}
++.file-card-hint {
++  grid-column: 1 / -1;
++}
++.help ul {
++  padding-left: 1.2rem;
++  display: grid;
++  gap: 0.4rem;
++  color: var(--ink-soft);
++}
++
++/* ---------- Forms & notices ---------- */
++.field {
++  display: grid;
++  gap: 0.35rem;
++}
++.field label {
++  font-weight: 600;
++}
++.field input {
++  min-height: 48px;
++  padding: 0 0.9rem;
++  font: inherit;
++  border: 2px solid var(--line);
++  border-radius: var(--radius-s);
++  background: #fff;
++  color: var(--ink);
++}
++.field input:focus-visible {
++  border-color: var(--focus);
++  outline-offset: 0;
++}
++.form-error,
++.notice-error {
++  background: var(--dead-bg);
++  color: var(--dead);
++  border-left: 4px solid var(--dead);
++  padding: 0.75rem 1rem;
++  border-radius: var(--radius-s);
++  font-weight: 600;
++}
++.form-hint {
++  color: var(--ink-soft);
++  font-size: 0.95rem;
++}
++.kv {
++  display: grid;
++  gap: 0.75rem;
++}
++.kv dt {
++  font-size: 0.9rem;
++  color: var(--ink-soft);
++}
++.kv dd {
++  font-weight: 600;
++}
++.recent-list {
++  list-style: none;
++  padding: 0;
++}
++
++/* ---------- Login ---------- */
++.login {
++  min-height: 100vh;
++  display: grid;
++  grid-template-columns: 1fr minmax(320px, 440px);
++  align-items: center;
++  gap: 4rem;
++  padding: 3rem clamp(1.5rem, 6vw, 6rem);
++  background: linear-gradient(90deg, var(--harbor-deep) 0 55%, var(--paper) 55%);
++}
++.login-intro {
++  color: #dbe7ea;
++  max-width: 30rem;
++}
++.brand-mark-large {
++  width: 56px;
++  height: 56px;
++  margin-bottom: 1.5rem;
++}
++.login-title {
++  color: #fff;
++  font-size: clamp(2rem, 4vw, 2.75rem);
++  line-height: 1.1;
++  font-weight: 700;
++  margin-bottom: 1rem;
++}
++.login-lead {
++  font-size: 1.15rem;
++}
++.login-card {
++  background: var(--panel);
++  border-radius: var(--radius-m);
++  border: 1px solid var(--line);
++  box-shadow: 0 12px 40px rgba(18, 56, 67, 0.18);
++  padding: 2rem;
++  display: grid;
++  gap: 1.1rem;
++}
++.login-card-title {
++  font-size: 1.4rem;
++}
++
++/* ---------- Responsive ---------- */
++@media (max-width: 1000px) {
++  .stat-strip {
++    grid-template-columns: repeat(3, 1fr);
++  }
++  .stat:nth-child(4) {
++    border-left: 0;
++  }
++  .stat:nth-child(n + 4) {
++    border-top: 1px solid var(--line);
++  }
++}
++@media (max-width: 860px) {
++  .app {
++    grid-template-columns: 1fr;
++  }
++  .sidebar {
++    position: fixed;
++    left: 0;
++    top: 0;
++    z-index: 50;
++    width: min(var(--sidebar-w), 85vw);
++    transform: translateX(-100%);
++    transition: transform 0.2s ease;
++    visibility: hidden;
++  }
++  .sidebar.is-open {
++    transform: none;
++    visibility: visible;
++  }
++  .scrim {
++    position: fixed;
++    inset: 0;
++    z-index: 40;
++    background: rgba(10, 30, 36, 0.45);
++  }
++  .menu-button {
++    display: inline-grid;
++  }
++  .topbar {
++    padding: 0.75rem 1rem;
++  }
++  .page-title {
++    font-size: 1.25rem;
++  }
++  .user-email {
++    display: none;
++  }
++  .content {
++    padding: 1.5rem 1rem 3rem;
++  }
++  .drop-banner {
++    grid-template-columns: 1fr;
++    justify-items: start;
++    padding: 1.5rem;
++  }
++  .login {
++    grid-template-columns: 1fr;
++    gap: 0;
++    align-content: start;
++    padding: 0 0 2rem;
++    background: var(--paper);
++  }
++  .login-intro {
++    max-width: none;
++    background: var(--harbor-deep);
++    padding: 2.5rem 1.5rem 4.5rem;
++  }
++  .login-card {
++    margin: -2.5rem 1rem 0;
++    padding: 1.5rem;
++  }
++}
++@media (max-width: 560px) {
++  .stat-strip {
++    grid-template-columns: 1fr 1fr;
++  }
++  .stat,
++  .stat:nth-child(4) {
++    border-left: 0;
++    border-top: 1px solid var(--line);
++  }
++  .stat:nth-child(even) {
++    border-left: 1px solid var(--line);
++  }
++  .stat:nth-child(-n + 2) {
++    border-top: 0;
++  }
++  .file-card {
++    grid-template-columns: 1fr;
++  }
++}
++.steps li.is-done::before {
++  background: var(--active-bg);
++  border-color: var(--active);
++  color: var(--active);
+ }
+diff --git a/src/shared/api.ts b/src/shared/api.ts
+index 3f7cd02..9544a4b 100644
+--- a/src/shared/api.ts
++++ b/src/shared/api.ts
+@@ -1,6 +1,5 @@
+ /**
+  * Types shared by the Worker (backend) and the React app (frontend).
+- * Keep machine-readable values here; friendly UI labels live in the client.
+  */
+ 
+ export interface HealthResponse {
+@@ -19,3 +18,36 @@ export interface ApiError {
+     requestId?: string;
+   };
+ }
++
++export interface SessionUser {
++  email: string;
++}
++
++export interface MeResponse {
++  user: SessionUser;
++}
++
++export interface LoginRequest {
++  email: string;
++  password: string;
++}
++
++export interface RecentScan {
++  id: string;
++  fileName: string;
++  createdAt: string;
++  urlsChecked: number;
++  active: number;
++  dead: number;
++  issues: number;
++  status: 'pending' | 'running' | 'completed' | 'failed';
++}
++
++export interface DashboardSummary {
++  totalScans: number;
++  urlsChecked: number;
++  activeLinks: number;
++  deadLinks: number;
++  issuesFound: number;
++  recentScans: RecentScan[];
++}
+diff --git a/src/shared/status.ts b/src/shared/status.ts
+new file mode 100644
+index 0000000..d5d0914
+--- /dev/null
++++ b/src/shared/status.ts
+@@ -0,0 +1,74 @@
++/**
++ * Backlink check statuses. Machine values (stored in the database, used in
++ * code) are kept separate from the friendly labels shown to Marketing users.
++ */
++export const LINK_STATUSES = [
++  'ACTIVE',
++  'DEAD',
++  'SOFT_404',
++  'REDIRECTED',
++  'BLOCKED',
++  'RATE_LIMITED',
++  'SERVER_ERROR',
++  'TIMEOUT',
++  'NETWORK_ERROR',
++  'PENDING',
++  'CHECKING',
++] as const;
++
++export type LinkStatus = (typeof LINK_STATUSES)[number];
++
++/** Colour/icon group used by the UI. Every badge also shows text. */
++export type StatusTone = 'active' | 'dead' | 'review' | 'redirected' | 'pending';
++
++export interface StatusInfo {
++  label: string;
++  tone: StatusTone;
++  description: string;
++  /** Temporary problems can be retried; they are never treated as dead. */
++  retryable: boolean;
++}
++
++export const STATUS_INFO: Record<LinkStatus, StatusInfo> = {
++  ACTIVE: { label: 'Active', tone: 'active', description: 'The page loads normally.', retryable: false },
++  DEAD: { label: 'Dead', tone: 'dead', description: 'The page is gone (404 or 410).', retryable: false },
++  SOFT_404: {
++    label: 'Soft 404',
++    tone: 'dead',
++    description: 'The page loads but says it no longer exists.',
++    retryable: false,
++  },
++  REDIRECTED: {
++    label: 'Redirected',
++    tone: 'redirected',
++    description: 'The page sends visitors to a different address.',
++    retryable: false,
++  },
++  BLOCKED: {
++    label: 'Blocked',
++    tone: 'review',
++    description: 'The site refused our check. Open it yourself to confirm.',
++    retryable: true,
++  },
++  RATE_LIMITED: {
++    label: 'Rate limited',
++    tone: 'review',
++    description: 'The site asked us to slow down. Retry later.',
++    retryable: true,
++  },
++  SERVER_ERROR: {
++    label: 'Server error',
++    tone: 'review',
++    description: 'The site had a problem on its side. Retry later.',
++    retryable: true,
++  },
++  TIMEOUT: { label: 'Timed out', tone: 'review', description: 'The site took too long to respond.', retryable: true },
++  NETWORK_ERROR: {
++    label: 'Could not connect',
++    tone: 'review',
++    description: 'The address could not be reached (DNS or connection problem).',
++    retryable: true,
++  },
++  PENDING: { label: 'Waiting', tone: 'pending', description: 'Not checked yet.', retryable: false },
++  CHECKING: { label: 'Checking', tone: 'pending', description: 'Being checked right now.', retryable: false },
++};
+diff --git a/src/worker/app.ts b/src/worker/app.ts
+index c3c4560..39e6c86 100644
+--- a/src/worker/app.ts
++++ b/src/worker/app.ts
+@@ -1,9 +1,12 @@
+ import { Hono } from 'hono';
+ import type { AppContext } from './env';
+-import type { ApiError } from '../shared/api';
++import { apiError } from './errors';
+ import { securityHeaders } from './middleware/security-headers';
+ import { requestId } from './middleware/request-id';
++import { csrfProtection } from './middleware/csrf';
+ import { healthRoutes } from './routes/health';
++import { authRoutes } from './routes/auth';
++import { dashboardRoutes } from './routes/dashboard';
+ 
+ /**
+  * The API application. Built as a factory so tests can call app.request()
+@@ -14,31 +17,20 @@ export function createApp() {
+ 
+   app.use('*', requestId());
+   app.use('*', securityHeaders());
++  app.use('*', csrfProtection());
+ 
+   app.route('/health', healthRoutes);
++  app.route('/auth', authRoutes);
++  app.route('/dashboard', dashboardRoutes);
+ 
+-  app.notFound((c) =>
+-    c.json<ApiError>(
+-      { error: { code: 'NOT_FOUND', message: 'This API route does not exist.', requestId: c.get('requestId') } },
+-      404,
+-    ),
+-  );
++  app.notFound((c) => apiError(c, 404, 'NOT_FOUND', 'This API route does not exist.'));
+ 
+   // Log full details server-side; send users a plain message only.
+   app.onError((err, c) => {
+     console.error(
+       JSON.stringify({ level: 'error', requestId: c.get('requestId'), message: err.message, stack: err.stack }),
+     );
+-    return c.json<ApiError>(
+-      {
+-        error: {
+-          code: 'INTERNAL_ERROR',
+-          message: 'Something went wrong on our side. Please try again in a moment.',
+-          requestId: c.get('requestId'),
+-        },
+-      },
+-      500,
+-    );
++    return apiError(c, 500, 'INTERNAL_ERROR', 'Something went wrong on our side. Please try again in a moment.');
+   });
+ 
+   return app;
+diff --git a/src/worker/auth/session.ts b/src/worker/auth/session.ts
+new file mode 100644
+index 0000000..7ba02a4
+--- /dev/null
++++ b/src/worker/auth/session.ts
+@@ -0,0 +1,74 @@
++/**
++ * Signed session cookies (HMAC-SHA256). The cookie holds the user's email and
++ * an expiry; the signature stops anyone from forging or editing it.
++ * Uses only Web Crypto so it runs in Workers and in tests.
++ */
++
++export const SESSION_COOKIE = '__Host-bhc_session';
++export const SESSION_TTL_SECONDS = 60 * 60 * 12; // 12 hours
++
++export interface SessionPayload {
++  sub: string; // user email
++  exp: number; // unix seconds
++}
++
++const encoder = new TextEncoder();
++
++function toBase64Url(bytes: Uint8Array): string {
++  let bin = '';
++  for (const b of bytes) bin += String.fromCharCode(b);
++  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
++}
++
++function fromBase64Url(s: string): Uint8Array {
++  const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4);
++  const bin = atob(b64);
++  const out = new Uint8Array(bin.length);
++  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
++  return out;
++}
++
++async function hmacKey(secret: string): Promise<CryptoKey> {
++  return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
++    'sign',
++    'verify',
++  ]);
++}
++
++export async function signSession(payload: SessionPayload, secret: string): Promise<string> {
++  const body = toBase64Url(encoder.encode(JSON.stringify(payload)));
++  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', await hmacKey(secret), encoder.encode(body)));
++  return `${body}.${toBase64Url(sig)}`;
++}
++
++export async function verifySession(
++  token: string,
++  secret: string,
++  nowSeconds = Math.floor(Date.now() / 1000),
++): Promise<SessionPayload | null> {
++  const [body, sig] = token.split('.');
++  if (!body || !sig) return null;
++  try {
++    const ok = await crypto.subtle.verify('HMAC', await hmacKey(secret), fromBase64Url(sig), encoder.encode(body));
++    if (!ok) return null;
++    const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(body))) as Partial<SessionPayload>;
++    if (typeof payload.sub !== 'string' || typeof payload.exp !== 'number') return null;
++    if (payload.exp <= nowSeconds) return null;
++    return { sub: payload.sub, exp: payload.exp };
++  } catch {
++    return null;
++  }
++}
++
++/** Compares two strings without leaking where they differ via timing. */
++export async function safeEqual(a: string, b: string): Promise<boolean> {
++  const [ha, hb] = await Promise.all([
++    crypto.subtle.digest('SHA-256', encoder.encode(a)),
++    crypto.subtle.digest('SHA-256', encoder.encode(b)),
++  ]);
++  const va = new Uint8Array(ha);
++  const vb = new Uint8Array(hb);
++  let diff = 0;
++  for (let i = 0; i < va.length; i++) diff |= va[i]! ^ vb[i]!;
++  return diff === 0;
++}
+diff --git a/src/worker/env.ts b/src/worker/env.ts
+index a069c15..3f5ba21 100644
+--- a/src/worker/env.ts
++++ b/src/worker/env.ts
+@@ -1,18 +1,25 @@
+ /**
+- * Worker bindings. Extend this as later phases add resources:
++ * Worker bindings and secrets. Extend as later phases add resources:
+  *   Phase 3: DB: D1Database
+  *   Phase 5: SCAN_QUEUE: Queue
+  *   Phase 8: EXPORTS: R2Bucket (optional)
+- * Secrets (set with `wrangler secret put`) are also declared here.
+  */
+ export interface Env {
+   APP_ENV: string;
+   APP_NAME: string;
+   ASSETS?: Fetcher;
++
++  // Secrets — set in Cloudflare (Worker → Settings → Variables and Secrets)
++  // or locally in .dev.vars. Phase 3 replaces AUTH_EMAIL/AUTH_PASSWORD with
++  // a users table.
++  AUTH_EMAIL?: string;
++  AUTH_PASSWORD?: string;
++  SESSION_SECRET?: string;
+ }
+ 
+ export interface AppVariables {
+   requestId: string;
++  user?: { email: string };
+ }
+ 
+ export type AppContext = { Bindings: Env; Variables: AppVariables };
+diff --git a/src/worker/errors.ts b/src/worker/errors.ts
+new file mode 100644
+index 0000000..52fb87e
+--- /dev/null
++++ b/src/worker/errors.ts
+@@ -0,0 +1,9 @@
++import type { Context } from 'hono';
++import type { ContentfulStatusCode } from 'hono/utils/http-status';
++import type { ApiError } from '../shared/api';
++import type { AppContext } from './env';
++
++/** Consistent, user-safe error responses. */
++export function apiError(c: Context<AppContext>, status: ContentfulStatusCode, code: string, message: string) {
++  return c.json<ApiError>({ error: { code, message, requestId: c.get('requestId') } }, status);
++}
+diff --git a/src/worker/middleware/auth.ts b/src/worker/middleware/auth.ts
+new file mode 100644
+index 0000000..9131205
+--- /dev/null
++++ b/src/worker/middleware/auth.ts
+@@ -0,0 +1,15 @@
++import type { MiddlewareHandler } from 'hono';
++import { getCookie } from 'hono/cookie';
++import type { AppContext } from '../env';
++import { apiError } from '../errors';
++import { SESSION_COOKIE, verifySession } from '../auth/session';
++
++/** Blocks the route unless the request carries a valid session cookie. */
++export const requireAuth = (): MiddlewareHandler<AppContext> => async (c, next) => {
++  const secret = c.env.SESSION_SECRET;
++  const token = getCookie(c, SESSION_COOKIE);
++  const session = secret && token ? await verifySession(token, secret) : null;
++  if (!session) return apiError(c, 401, 'UNAUTHENTICATED', 'Please sign in to continue.');
++  c.set('user', { email: session.sub });
++  return next();
++};
+diff --git a/src/worker/middleware/csrf.ts b/src/worker/middleware/csrf.ts
+new file mode 100644
+index 0000000..d28f1a9
+--- /dev/null
++++ b/src/worker/middleware/csrf.ts
+@@ -0,0 +1,24 @@
++import type { MiddlewareHandler } from 'hono';
++import type { AppContext } from '../env';
++import { apiError } from '../errors';
++
++const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
++
++/**
++ * CSRF protection for cookie-based sessions: any request that changes data
++ * must come from our own origin. Works together with SameSite=Lax cookies.
++ */
++export const csrfProtection = (): MiddlewareHandler<AppContext> => async (c, next) => {
++  if (SAFE_METHODS.has(c.req.method)) return next();
++  const origin = c.req.header('Origin');
++  const expected = new URL(c.req.url).origin;
++  if (!origin || origin !== expected) {
++    return apiError(
++      c,
++      403,
++      'FORBIDDEN_ORIGIN',
++      'This request was blocked for your security. Reload the page and try again.',
++    );
++  }
++  return next();
++};
+diff --git a/src/worker/routes/auth.ts b/src/worker/routes/auth.ts
+new file mode 100644
+index 0000000..bc9f4f5
+--- /dev/null
++++ b/src/worker/routes/auth.ts
+@@ -0,0 +1,60 @@
++import { Hono } from 'hono';
++import { deleteCookie, setCookie } from 'hono/cookie';
++import type { AppContext } from '../env';
++import type { LoginRequest, MeResponse } from '../../shared/api';
++import { apiError } from '../errors';
++import { requireAuth } from '../middleware/auth';
++import { SESSION_COOKIE, SESSION_TTL_SECONDS, safeEqual, signSession } from '../auth/session';
++
++const MIN_SECRET_LENGTH = 32;
++
++function isLoginRequest(v: unknown): v is LoginRequest {
++  if (typeof v !== 'object' || v === null) return false;
++  const r = v as Record<string, unknown>;
++  return typeof r.email === 'string' && typeof r.password === 'string';
++}
++
++export const authRoutes = new Hono<AppContext>()
++  .post('/login', async (c) => {
++    const { AUTH_EMAIL, AUTH_PASSWORD, SESSION_SECRET } = c.env;
++    if (!AUTH_EMAIL || !AUTH_PASSWORD || !SESSION_SECRET || SESSION_SECRET.length < MIN_SECRET_LENGTH) {
++      console.error(JSON.stringify({ level: 'error', message: 'Auth secrets missing or SESSION_SECRET too short' }));
++      return apiError(c, 503, 'AUTH_NOT_CONFIGURED', 'Sign-in is not set up yet. Ask your administrator.');
++    }
++
++    let body: unknown;
++    try {
++      body = await c.req.json();
++    } catch {
++      return apiError(c, 400, 'INVALID_REQUEST', 'Enter your email and password.');
++    }
++    if (!isLoginRequest(body) || body.email.length > 254 || body.password.length > 1024) {
++      return apiError(c, 400, 'INVALID_REQUEST', 'Enter your email and password.');
++    }
++
++    const email = body.email.trim().toLowerCase();
++    // Check both fields every time so response time doesn't reveal which was wrong.
++    const [emailOk, passwordOk] = await Promise.all([
++      safeEqual(email, AUTH_EMAIL.trim().toLowerCase()),
++      safeEqual(body.password, AUTH_PASSWORD),
++    ]);
++    if (!emailOk || !passwordOk) {
++      return apiError(c, 401, 'INVALID_CREDENTIALS', 'That email and password don’t match. Check them and try again.');
++    }
++
++    const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
++    const token = await signSession({ sub: email, exp }, SESSION_SECRET);
++    setCookie(c, SESSION_COOKIE, token, {
++      httpOnly: true,
++      secure: true,
++      sameSite: 'Lax',
++      path: '/',
++      maxAge: SESSION_TTL_SECONDS,
++    });
++    return c.json<MeResponse>({ user: { email } });
++  })
++  .post('/logout', (c) => {
++    deleteCookie(c, SESSION_COOKIE, { path: '/', secure: true });
++    return c.json({ ok: true });
++  })
++  .get('/me', requireAuth(), (c) => c.json<MeResponse>({ user: c.get('user')! }));
+diff --git a/src/worker/routes/dashboard.ts b/src/worker/routes/dashboard.ts
+new file mode 100644
+index 0000000..31973f5
+--- /dev/null
++++ b/src/worker/routes/dashboard.ts
+@@ -0,0 +1,17 @@
++import { Hono } from 'hono';
++import type { AppContext } from '../env';
++import type { DashboardSummary } from '../../shared/api';
++import { requireAuth } from '../middleware/auth';
++
++/** Phase 1: no scans are stored yet. Phase 3 reads these numbers from D1. */
++export const dashboardRoutes = new Hono<AppContext>().get('/', requireAuth(), (c) => {
++  const summary: DashboardSummary = {
++    totalScans: 0,
++    urlsChecked: 0,
++    activeLinks: 0,
++    deadLinks: 0,
++    issuesFound: 0,
++    recentScans: [],
++  };
++  return c.json(summary);
++});
+diff --git a/src/worker/version.ts b/src/worker/version.ts
+index 0c01a5a..9ed9ebe 100644
+--- a/src/worker/version.ts
++++ b/src/worker/version.ts
+@@ -1,2 +1,2 @@
+ // Bump with each release. CI can overwrite this with the Git SHA later.
+-export const APP_VERSION = '0.1.0';
++export const APP_VERSION = '0.2.0';
+diff --git a/tests/worker/auth.test.ts b/tests/worker/auth.test.ts
+new file mode 100644
+index 0000000..e07050b
+--- /dev/null
++++ b/tests/worker/auth.test.ts
+@@ -0,0 +1,108 @@
++import { describe, expect, it } from 'vitest';
++import type { ApiError, MeResponse } from '../../src/shared/api';
++import { call, cookieFrom, env, login, ORIGIN } from './helpers';
++
++describe('POST /api/auth/login', () => {
++  it('signs in with the right email (any case) and password', async () => {
++    const res = await login('  marketing@example.COM ', env.AUTH_PASSWORD!);
++    expect(res.status).toBe(200);
++    expect(((await res.json()) as MeResponse).user.email).toBe('marketing@example.com');
++
++    const cookie = res.headers.get('Set-Cookie') ?? '';
++    expect(cookie).toMatch(/^__Host-bhc_session=/);
++    expect(cookie).toMatch(/HttpOnly/i);
++    expect(cookie).toMatch(/Secure/i);
++    expect(cookie).toMatch(/SameSite=Lax/i);
++    expect(cookie).toMatch(/Path=\//);
++  });
++
++  it('rejects a wrong password with a friendly message and no cookie', async () => {
++    const res = await login('marketing@example.com', 'wrong');
++    expect(res.status).toBe(401);
++    expect(res.headers.get('Set-Cookie')).toBeNull();
++    const body = (await res.json()) as ApiError;
++    expect(body.error.code).toBe('INVALID_CREDENTIALS');
++  });
++
++  it('rejects a wrong email', async () => {
++    expect((await login('someone@else.com', env.AUTH_PASSWORD!)).status).toBe(401);
++  });
++
++  it('rejects malformed bodies', async () => {
++    const res = await call('/api/auth/login', {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
++      body: '{not json',
++    });
++    expect(res.status).toBe(400);
++  });
++
++  it('reports when sign-in is not configured instead of letting anyone in', async () => {
++    const res = await login('a@b.com', 'x', { ...env, AUTH_PASSWORD: undefined });
++    expect(res.status).toBe(503);
++    expect(((await res.json()) as ApiError).error.code).toBe('AUTH_NOT_CONFIGURED');
++  });
++
++  it('refuses a SESSION_SECRET that is too short', async () => {
++    const res = await login('marketing@example.com', env.AUTH_PASSWORD!, { ...env, SESSION_SECRET: 'short' });
++    expect(res.status).toBe(503);
++  });
++});
++
++describe('CSRF protection', () => {
++  it('blocks POSTs from another site', async () => {
++    const res = await login('marketing@example.com', env.AUTH_PASSWORD!, env, 'https://evil.example');
++    expect(res.status).toBe(403);
++    expect(res.headers.get('Set-Cookie')).toBeNull();
++  });
++
++  it('blocks POSTs with no Origin header', async () => {
++    const res = await call('/api/auth/logout', { method: 'POST' });
++    expect(res.status).toBe(403);
++  });
++});
++
++describe('protected routes', () => {
++  it('GET /api/auth/me is 401 without a session', async () => {
++    expect((await call('/api/auth/me')).status).toBe(401);
++  });
++
++  it('GET /api/auth/me returns the user with a valid session', async () => {
++    const cookie = cookieFrom(await login('marketing@example.com', env.AUTH_PASSWORD!));
++    const res = await call('/api/auth/me', { headers: { Cookie: cookie } });
++    expect(res.status).toBe(200);
++    expect(((await res.json()) as MeResponse).user.email).toBe('marketing@example.com');
++  });
++
++  it('rejects a tampered cookie', async () => {
++    const cookie = cookieFrom(await login('marketing@example.com', env.AUTH_PASSWORD!));
++    const [name, value] = cookie.split('=');
++    const [body, sig] = value!.split('.');
++    const forgedBody = btoa(JSON.stringify({ sub: 'attacker@evil.com', exp: 9999999999 })).replace(/=+$/, '');
++    const res = await call('/api/auth/me', { headers: { Cookie: `${name}=${forgedBody}.${sig}` } });
++    expect(res.status).toBe(401);
++    expect(body).not.toBe(forgedBody);
++  });
++
++  it('rejects sessions signed with a different secret', async () => {
++    const cookie = cookieFrom(await login('marketing@example.com', env.AUTH_PASSWORD!));
++    const res = await call('/api/auth/me', { headers: { Cookie: cookie } }, { ...env, SESSION_SECRET: 'y'.repeat(40) });
++    expect(res.status).toBe(401);
++  });
++
++  it('GET /api/dashboard requires sign-in and returns zeroed totals', async () => {
++    expect((await call('/api/dashboard')).status).toBe(401);
++    const cookie = cookieFrom(await login('marketing@example.com', env.AUTH_PASSWORD!));
++    const res = await call('/api/dashboard', { headers: { Cookie: cookie } });
++    expect(res.status).toBe(200);
++    expect(await res.json()).toMatchObject({ totalScans: 0, recentScans: [] });
++  });
++});
++
++describe('POST /api/auth/logout', () => {
++  it('clears the session cookie', async () => {
++    const res = await call('/api/auth/logout', { method: 'POST', headers: { Origin: ORIGIN } });
++    expect(res.status).toBe(200);
++    expect(res.headers.get('Set-Cookie')).toMatch(/__Host-bhc_session=;.*Max-Age=0/i);
++  });
++});
+diff --git a/tests/worker/helpers.ts b/tests/worker/helpers.ts
+new file mode 100644
+index 0000000..be46c6e
+--- /dev/null
++++ b/tests/worker/helpers.ts
+@@ -0,0 +1,34 @@
++import { createApp } from '../../src/worker/app';
++import type { Env } from '../../src/worker/env';
++
++export const ORIGIN = 'https://bhc.test';
++
++export const env: Env = {
++  APP_ENV: 'test',
++  APP_NAME: 'Backlink Health Checker',
++  AUTH_EMAIL: 'Marketing@Example.com',
++  AUTH_PASSWORD: 'correct horse battery staple',
++  SESSION_SECRET: 'x'.repeat(40),
++};
++
++export function call(path: string, init: RequestInit = {}, e: Env = env) {
++  return createApp().request(`${ORIGIN}${path}`, init, e);
++}
++
++export function login(email: string, password: string, e: Env = env, origin = ORIGIN) {
++  return call(
++    '/api/auth/login',
++    {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json', Origin: origin },
++      body: JSON.stringify({ email, password }),
++    },
++    e,
++  );
++}
++
++/** Turns a Set-Cookie header into a Cookie header value. */
++export function cookieFrom(res: Response): string {
++  const set = res.headers.get('Set-Cookie') ?? '';
++  return set.split(';')[0] ?? '';
++}
+diff --git a/tests/worker/session.test.ts b/tests/worker/session.test.ts
+new file mode 100644
+index 0000000..635c321
+--- /dev/null
++++ b/tests/worker/session.test.ts
+@@ -0,0 +1,30 @@
++import { describe, expect, it } from 'vitest';
++import { safeEqual, signSession, verifySession } from '../../src/worker/auth/session';
++
++const SECRET = 's'.repeat(40);
++
++describe('session tokens', () => {
++  it('round-trips a valid session', async () => {
++    const token = await signSession({ sub: 'a@b.com', exp: 2_000_000_000 }, SECRET);
++    expect(await verifySession(token, SECRET, 1_000)).toEqual({ sub: 'a@b.com', exp: 2_000_000_000 });
++  });
++
++  it('rejects expired sessions', async () => {
++    const token = await signSession({ sub: 'a@b.com', exp: 100 }, SECRET);
++    expect(await verifySession(token, SECRET, 101)).toBeNull();
++  });
++
++  it('rejects garbage', async () => {
++    for (const t of ['', 'abc', 'a.b', '..', 'x.y.z']) {
++      expect(await verifySession(t, SECRET)).toBeNull();
++    }
++  });
++});
++
++describe('safeEqual', () => {
++  it('compares strings correctly', async () => {
++    expect(await safeEqual('same', 'same')).toBe(true);
++    expect(await safeEqual('same', 'Same')).toBe(false);
++    expect(await safeEqual('short', 'much longer value')).toBe(false);
++  });
++});
+diff --git a/tests/worker/status.test.ts b/tests/worker/status.test.ts
+new file mode 100644
+index 0000000..2f79fbe
+--- /dev/null
++++ b/tests/worker/status.test.ts
+@@ -0,0 +1,24 @@
++import { describe, expect, it } from 'vitest';
++import { LINK_STATUSES, STATUS_INFO } from '../../src/shared/status';
++
++describe('status model', () => {
++  it('has a label, tone and description for every status', () => {
++    for (const s of LINK_STATUSES) {
++      const info = STATUS_INFO[s];
++      expect(info.label.length).toBeGreaterThan(0);
++      expect(info.description.length).toBeGreaterThan(0);
++    }
++  });
++
++  it('never treats temporary problems as dead', () => {
++    for (const s of ['BLOCKED', 'RATE_LIMITED', 'SERVER_ERROR', 'TIMEOUT', 'NETWORK_ERROR'] as const) {
++      expect(STATUS_INFO[s].tone).not.toBe('dead');
++      expect(STATUS_INFO[s].retryable).toBe(true);
++    }
++  });
++
++  it('keeps confirmed results non-retryable by default', () => {
++    expect(STATUS_INFO.ACTIVE.retryable).toBe(false);
++    expect(STATUS_INFO.DEAD.retryable).toBe(false);
++  });
++});
+diff --git a/tests/worker/upload-rules.test.ts b/tests/worker/upload-rules.test.ts
+new file mode 100644
+index 0000000..c61f274
+--- /dev/null
++++ b/tests/worker/upload-rules.test.ts
+@@ -0,0 +1,20 @@
++import { describe, expect, it } from 'vitest';
++import { checkUploadFile, MAX_UPLOAD_BYTES } from '../../src/client/lib/upload-rules';
++
++describe('upload file checks', () => {
++  it('accepts .xlsx files (any case)', () => {
++    expect(checkUploadFile({ name: 'Backlinks.xlsx', size: 5000 })).toBeNull();
++    expect(checkUploadFile({ name: 'LINKS.XLSX', size: 5000 })).toBeNull();
++  });
++
++  it('rejects other file types with a helpful message', () => {
++    for (const name of ['links.csv', 'links.xls', 'links.xlsx.exe', 'links']) {
++      expect(checkUploadFile({ name, size: 5000 })).toMatch(/xlsx/);
++    }
++  });
++
++  it('rejects empty and oversized files', () => {
++    expect(checkUploadFile({ name: 'a.xlsx', size: 0 })).toMatch(/empty/);
++    expect(checkUploadFile({ name: 'a.xlsx', size: MAX_UPLOAD_BYTES + 1 })).toMatch(/10 MB/);
++  });
++});
+-- 
+2.43.0
+
