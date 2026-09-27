@@ -2,7 +2,7 @@
 
 Upload an Excel workbook of backlinks, find out which backlink pages are still live, and download the results. Built for Marketing users, hosted entirely on Cloudflare.
 
-> **Current status: Phase 3 — Database.** Upload a workbook, press Start scan, and the scan is saved to Cloudflare D1: it survives refreshes and appears in Scan history. Link checking arrives in Phase 4. See [docs/PHASES.md](docs/PHASES.md).
+> **Current status: Phase 4 — Link checker.** Saved scans can now be checked: every unique link is opened once and classified (Active, Dead, Redirected, Blocked, Rate limited, Server error, Timed out, Could not connect), with SSRF protection on every request and redirect. Checking runs while the scan page is open; background checking arrives in Phase 5. See [docs/PHASES.md](docs/PHASES.md).
 
 ## Architecture
 

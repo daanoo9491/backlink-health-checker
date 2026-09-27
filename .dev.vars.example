@@ -5,3 +5,8 @@ AUTH_EMAIL=you@example.com
 AUTH_PASSWORD=choose-a-strong-password
 # At least 32 random characters. Generate one with: npm run secret
 SESSION_SECRET=replace-with-at-least-32-random-characters
+
+# Optional, local development only: skip the DNS safety check if your network
+# blocks https://cloudflare-dns.com. Ignored unless APP_ENV=development.
+# APP_ENV=development
+# CHECKER_SKIP_DNS=true

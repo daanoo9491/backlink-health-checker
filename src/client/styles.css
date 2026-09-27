@@ -1067,3 +1067,24 @@ a:hover {
     display: none;
   }
 }
+
+/* ---------- Phase 4: checking ---------- */
+.check-panel {
+  justify-items: stretch;
+}
+.check-reason {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  max-width: 16rem;
+}
+.moved-to {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.moved-to a {
+  font-weight: 600;
+}

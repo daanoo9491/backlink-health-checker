@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
-import type { ScanDetail, ScanRowsResponse, ScanRowView } from '../../shared/api';
+import type { CheckBatchResponse, ScanDetail, ScanRowsResponse, ScanRowView } from '../../shared/api';
 import { STATUS_INFO, type LinkStatus } from '../../shared/status';
 import { INVALID_REASON_TEXT, type InvalidReason } from '../../shared/url';
 import { api, RequestError } from '../api/client';
@@ -24,6 +24,53 @@ export function ScanPage() {
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const [rowsVersion, setRowsVersion] = useState(0);
+  const stopRef = useRef(false);
+
+  // Stop the checking loop when the user leaves the page.
+  useEffect(
+    () => () => {
+      stopRef.current = true;
+    },
+    [],
+  );
+
+  // Warn before closing the tab while checking (checking pauses until they return).
+  useEffect(() => {
+    if (!checking) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [checking]);
+
+  const runChecks = useCallback(async () => {
+    stopRef.current = false;
+    setChecking(true);
+    setCheckError(null);
+    let failures = 0;
+    while (!stopRef.current) {
+      try {
+        const r = await api<CheckBatchResponse>(`/scans/${id}/check`, { method: 'POST' });
+        failures = 0;
+        setScan((prev) => (prev ? { ...prev, ...r.scan } : prev));
+        setRowsVersion((v) => v + 1);
+        if (r.remaining === 0) break;
+      } catch (e) {
+        if (e instanceof RequestError && e.status > 0 && e.status < 500 && e.status !== 429) {
+          setCheckError(e.message);
+          break;
+        }
+        if (++failures >= 5) {
+          setCheckError('Checking paused because the connection keeps dropping. Press Continue checking to carry on.');
+          break;
+        }
+        await new Promise((res) => setTimeout(res, 1000 * 2 ** failures));
+      }
+    }
+    setChecking(false);
+  }, [id]);
 
   useEffect(() => {
     api<ScanDetail>(`/scans/${id}`)
@@ -35,7 +82,7 @@ export function ScanPage() {
     api<ScanRowsResponse>(`/scans/${id}/rows?page=${page}&pageSize=${PAGE_SIZE}`)
       .then(setRows)
       .catch(() => setRows(null));
-  }, [id, page]);
+  }, [id, page, rowsVersion]);
 
   async function handleDelete() {
     setDeleting(true);
@@ -66,13 +113,25 @@ export function ScanPage() {
       </p>
     );
 
-  const stats = [
-    { label: 'Rows', value: scan.totalRows },
-    { label: 'Unique links', value: scan.uniqueUrls },
-    { label: 'Repeated links', value: scan.duplicateRows },
-    { label: 'Invalid', value: scan.invalidRows, tone: scan.invalidRows ? 'review' : undefined },
-    { label: 'Checked', value: scan.checkedCount },
-  ];
+  const started = scan.checkedCount > 0 || scan.status === 'running' || scan.status === 'completed';
+  const stats = started
+    ? [
+        { label: 'Active', value: scan.activeCount, tone: 'active' },
+        { label: 'Dead', value: scan.deadCount + scan.soft404Count, tone: 'dead' },
+        { label: 'Redirected', value: scan.redirectedCount },
+        { label: 'Need a look', value: scan.blockedCount + scan.errorCount, tone: 'review' },
+        { label: 'Waiting', value: scan.uniqueUrls - scan.checkedCount },
+      ]
+    : [
+        { label: 'Rows', value: scan.totalRows },
+        { label: 'Unique links', value: scan.uniqueUrls },
+        { label: 'Repeated links', value: scan.duplicateRows },
+        { label: 'Invalid', value: scan.invalidRows, tone: scan.invalidRows ? 'review' : undefined },
+        { label: 'Checked', value: scan.checkedCount },
+      ];
+  const pct = scan.uniqueUrls ? Math.round((scan.checkedCount / scan.uniqueUrls) * 100) : 0;
+  const canCheck = scan.status === 'ready' || scan.status === 'running';
+
   const from = rows && rows.total ? (rows.page - 1) * rows.pageSize + 1 : 0;
   const to = rows ? Math.min(rows.page * rows.pageSize, rows.total) : 0;
 
@@ -97,12 +156,54 @@ export function ScanPage() {
         </p>
       )}
 
-      {scan.status === 'ready' && (
-        <div className="notice notice-info" role={justSaved ? 'status' : undefined}>
-          <p className="notice-title">{justSaved ? 'Your scan is saved.' : 'This scan is saved and ready.'}</p>
+      {canCheck && (
+        <section className="panel check-panel" aria-labelledby="check-heading">
+          <h2 id="check-heading" className="section-title">
+            {checking
+              ? `Checking links… ${formatNumber(scan.checkedCount)} of ${formatNumber(scan.uniqueUrls)}`
+              : scan.status === 'running'
+                ? `${formatNumber(scan.checkedCount)} of ${formatNumber(scan.uniqueUrls)} links checked`
+                : justSaved
+                  ? 'Your scan is saved. Ready to check the links?'
+                  : 'Ready to check the links'}
+          </h2>
+          {(checking || scan.status === 'running') && (
+            <div
+              className="progress"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={pct}
+              aria-label="Links checked"
+            >
+              <span style={{ width: `${pct}%` }} />
+            </div>
+          )}
+          <p className="form-hint">
+            {checking
+              ? 'Keep this page open while we check. If you leave, checking pauses and you can continue later.'
+              : `We’ll open each of the ${formatNumber(scan.uniqueUrls)} unique links once. Keep this page open while it runs.`}
+          </p>
+          {checkError && (
+            <p className="notice notice-error" role="alert">
+              {checkError}
+            </p>
+          )}
+          {!checking && (
+            <div>
+              <button type="button" className="button button-primary" onClick={runChecks}>
+                {scan.status === 'running' ? 'Continue checking' : 'Start checking'}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+      {scan.status === 'completed' && (
+        <div className="notice notice-info" role="status">
+          <p className="notice-title">All {formatNumber(scan.uniqueUrls)} links checked.</p>
           <p>
-            Link checking arrives in the next update. Your file is stored, so you can close this page and come back to
-            it any time from Scan history.
+            Finished {scan.completedAt ? formatDate(scan.completedAt) : ''}. Each result is copied to every row that
+            uses the same link.
           </p>
         </div>
       )}
@@ -143,13 +244,16 @@ export function ScanPage() {
                 </th>
                 <th scope="col">Backlink</th>
                 <th scope="col">Status</th>
+                <th scope="col" className="num">
+                  HTTP
+                </th>
                 <th scope="col">Target URL</th>
               </tr>
             </thead>
             <tbody>
               {!rows && (
                 <tr>
-                  <td colSpan={5} className="form-hint">
+                  <td colSpan={6} className="form-hint">
                     Loading rows…
                   </td>
                 </tr>
@@ -217,6 +321,8 @@ export function ScanPage() {
 
 function RowView({ r }: { r: ScanRowView }) {
   const status = r.status && r.status in STATUS_INFO ? (r.status as LinkStatus) : null;
+  const checked = status && status !== 'PENDING' && status !== 'CHECKING';
+  const movedTo = r.finalUrl && r.url && r.finalUrl !== r.url ? r.finalUrl : null;
   return (
     <tr>
       <td>{r.sheet}</td>
@@ -230,16 +336,32 @@ function RowView({ r }: { r: ScanRowView }) {
           <span className="cell-value">{r.value}</span>
         )}
         {r.duplicate && <span className="tag">repeat</span>}
+        {movedTo && (
+          <span className="moved-to">
+            now at{' '}
+            {isSafeHref(movedTo) ? (
+              <a href={movedTo} target="_blank" rel="noopener noreferrer nofollow">
+                {movedTo}
+              </a>
+            ) : (
+              movedTo
+            )}
+          </span>
+        )}
       </td>
       <td>
         {status ? (
-          <StatusBadge status={status} />
+          <>
+            <StatusBadge status={status} />
+            {checked && r.checkReason && <span className="check-reason">{r.checkReason}</span>}
+          </>
         ) : (
           <span className="skipped">
             Skipped: {INVALID_REASON_TEXT[r.invalidReason as InvalidReason] ?? 'not a web address'}
           </span>
         )}
       </td>
+      <td className="num">{r.httpStatus ?? '—'}</td>
       <td className="cell-link">
         {isSafeHref(r.targetUrl) ? (
           <a href={r.targetUrl} target="_blank" rel="noopener noreferrer nofollow">

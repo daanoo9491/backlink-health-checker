@@ -58,3 +58,12 @@ Each phase ends with: tests passing, docs updated, commit, push, deploy, verific
 - **Privacy**: every query includes the signed-in user's id; another user's scan returns 404.
 - **Sign-in**: the account now has a row in `users`; sessions carry its id (old sessions must sign in again). Throttling: 10 failures per IP or 50 per email in 15 minutes → 429.
 - **Limits**: 20,000 rows and 20,000 unique links per scan (the free plan allows ~100,000 D1 row writes per day).
+
+## Decisions recorded in Phase 4
+
+- **Who drives checking (for now)**: the scan page calls `POST /api/scans/:id/check` in a loop; each call checks up to 8 links. Phase 5 moves the same `runCheckBatch` into a Cloudflare Queue consumer so the browser can close.
+- **Free-plan subrequests**: a Worker invocation may make 50 outgoing requests, and redirect hops and DNS lookups count. A `SubrequestBudget` (45) is tracked; links that don't fit go back to waiting for the next batch instead of failing.
+- **SSRF protection, on every hop**: redirects are followed manually (`redirect: 'manual'`, max 5). Before each request: http/https only, no credentials, no `localhost`/`.local`/`.internal`, no private/loopback/link-local/metadata/CGNAT/multicast IPs (IPv4 and IPv6, incl. IPv4-mapped), never the app's own hostname, and a DNS-over-HTTPS lookup (A + AAAA) that refuses names resolving to internal addresses. DNS failure fails closed. Bodies are never read in this phase.
+- **Classification** (`src/worker/checker/classify.ts`): 2xx → Active; 2xx after a redirect to a _different_ page → Redirected; after a _same-page_ redirect (http→https, www, trailing slash) → Active, with the redirect recorded; 404/410 (also at the end of a redirect chain) → Dead; 401/403/451 and other 4xx → Blocked; 408 → Timed out; 429 → Rate limited; 5xx and redirect loops → Server error; no answer in 15 s → Timed out; connection/TLS problems and unknown domains → Could not connect ("the domain doesn't exist (it may have expired)" is called out).
+- **Politeness**: at most 4 websites at once; requests to the same website run one at a time, 0.8 s apart. Each unique link is requested once, however many rows use it.
+- **Concurrency safety**: links are reserved (`claimed_at`, migration `0002`) while being checked, so two tabs never check the same link; reservations older than 2 minutes are taken over. Scan totals are recounted from `unique_urls` after every batch.

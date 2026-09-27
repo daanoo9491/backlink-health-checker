@@ -14,6 +14,9 @@ export interface Env {
   AUTH_EMAIL?: string;
   AUTH_PASSWORD?: string;
   SESSION_SECRET?: string;
+
+  /** Development only ("true" with APP_ENV=development): skip the DNS safety check. */
+  CHECKER_SKIP_DNS?: string;
 }
 
 export interface AppVariables {

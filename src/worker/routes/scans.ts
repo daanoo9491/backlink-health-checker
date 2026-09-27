@@ -9,11 +9,12 @@
  * value and SQLite unpacks them with json_each().
  */
 import { Hono } from 'hono';
-import type { CreateScanResponse, ScanListResponse, ScanRowsResponse } from '../../shared/api';
+import type { CheckBatchResponse, CreateScanResponse, ScanListResponse, ScanRowsResponse } from '../../shared/api';
 import type { AppContext } from '../env';
 import { apiError } from '../errors';
 import { requireAuth } from '../middleware/auth';
-import { getScan, listRows, listScans, toDetail } from '../db/scans';
+import { getScan, listRows, listScans, toDetail, toSummary } from '../db/scans';
+import { runCheckBatch } from '../checker/run-batch';
 import { parseAddRows, parseAddUrls, parseCreateScan, ValidationError } from '../validation';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -142,6 +143,22 @@ scanRoutes.post('/:id/complete', async (c) => {
     .bind(scan.id, counts.rows, counts.valid, counts.invalid, counts.urls, counts.dups)
     .first<typeof scan>();
   return c.json(toDetail(saved ?? scan));
+});
+
+/**
+ * Checks the next batch of links. The scan page calls this repeatedly while
+ * it is open (Phase 5 moves this to a background queue).
+ */
+scanRoutes.post('/:id/check', async (c) => {
+  const userId = c.get('user')!.id;
+  const scan = await getScan(c.env, userId, c.req.param('id'));
+  if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was deleted.');
+  if (scan.status === 'uploading') {
+    return apiError(c, 409, 'NOT_READY', 'This upload didn’t finish. Delete it and upload the file again.');
+  }
+  const outcome = await runCheckBatch(c.env, scan.id, { ownHost: new URL(c.req.url).hostname });
+  const updated = (await getScan(c.env, userId, scan.id))!;
+  return c.json<CheckBatchResponse>({ scan: toSummary(updated), ...outcome });
 });
 
 scanRoutes.get('/:id', async (c) => {

@@ -91,37 +91,45 @@ function isIPv4(host: string): boolean {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
 }
 
+/**
+ * True for any IP address that isn't a normal public internet address:
+ * loopback, private, link-local (incl. cloud metadata 169.254.169.254),
+ * carrier-grade NAT, multicast/reserved, and their IPv6 equivalents.
+ * Accepts IPv6 with or without [brackets].
+ */
+export function isInternalIp(ip: string): boolean {
+  const a = ip.toLowerCase().replace(/^\[|\]$/g, '');
+  if (isIPv4(a)) {
+    const [o1, o2] = a.split('.').map(Number) as [number, number];
+    return (
+      o1 === 0 ||
+      o1 === 10 ||
+      o1 === 127 ||
+      (o1 === 100 && o2 >= 64 && o2 <= 127) || // carrier-grade NAT
+      (o1 === 169 && o2 === 254) || // link-local / cloud metadata
+      (o1 === 172 && o2 >= 16 && o2 <= 31) ||
+      (o1 === 192 && o2 === 168) ||
+      (o1 === 192 && o2 === 0) || // 192.0.0.0/24 IETF + 192.0.2.0/24 docs
+      (o1 === 198 && (o2 === 18 || o2 === 19)) || // benchmarking
+      o1 >= 224 // multicast / reserved / broadcast
+    );
+  }
+  if (!a.includes(':')) return false;
+  if (a === '::' || a === '::1') return true;
+  // IPv4-mapped / translated forms can hide a private IPv4.
+  if (a.startsWith('::ffff:') || a.startsWith('64:ff9b:')) return true;
+  const first = parseInt(a.split(':')[0] || '0', 16);
+  return (
+    (first & 0xfe00) === 0xfc00 || // fc00::/7 unique local
+    (first & 0xffc0) === 0xfe80 || // fe80::/10 link-local
+    (first & 0xff00) === 0xff00 || // ff00::/8 multicast
+    (first === 0x2001 && parseInt(a.split(':')[1] || '0', 16) === 0x0db8) // 2001:db8::/32 documentation
+  );
+}
+
 export function isInternalHost(hostname: string): boolean {
   const h = hostname.toLowerCase().replace(/\.$/, '');
   if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return true;
-
-  if (isIPv4(h)) {
-    const [a, b] = h.split('.').map(Number) as [number, number, number, number];
-    return (
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) || // carrier-grade NAT
-      (a === 169 && b === 254) || // link-local / cloud metadata
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      a >= 224 // multicast / reserved
-    );
-  }
-
-  if (h.startsWith('[')) {
-    const v6 = h.slice(1, -1);
-    return (
-      v6 === '::' ||
-      v6 === '::1' ||
-      v6.startsWith('fc') ||
-      v6.startsWith('fd') ||
-      v6.startsWith('fe8') ||
-      v6.startsWith('fe9') ||
-      v6.startsWith('fea') ||
-      v6.startsWith('feb') ||
-      v6.startsWith('::ffff:') // IPv4-mapped: could hide a private IPv4
-    );
-  }
+  if (isIPv4(h) || h.startsWith('[')) return isInternalIp(h);
   return false;
 }

@@ -86,6 +86,7 @@ interface RowRecord {
   target_url: string | null;
   anchor_text: string | null;
   status: string | null;
+  check_reason: string | null;
   http_status: number | null;
   final_url: string | null;
   response_time_ms: number | null;
@@ -102,7 +103,7 @@ export async function listRows(
     env.DB.prepare('SELECT COUNT(*) AS n FROM scan_rows WHERE scan_id = ?1').bind(scanId),
     env.DB.prepare(
       `SELECT r.sheet_name, r.row_number, r.original_value, u.url, r.is_duplicate, r.invalid_reason,
-              r.target_url, r.anchor_text, u.status, u.http_status, u.final_url, u.response_time_ms, u.checked_at
+              r.target_url, r.anchor_text, u.status, u.check_reason, u.http_status, u.final_url, u.response_time_ms, u.checked_at
        FROM scan_rows r
        LEFT JOIN unique_urls u ON u.scan_id = r.scan_id AND u.url_index = r.url_index
        WHERE r.scan_id = ?1
@@ -123,6 +124,7 @@ export async function listRows(
       targetUrl: r.target_url,
       anchorText: r.anchor_text,
       status: r.status,
+      checkReason: r.check_reason,
       httpStatus: r.http_status,
       finalUrl: r.final_url,
       responseTimeMs: r.response_time_ms,

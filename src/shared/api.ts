@@ -144,6 +144,7 @@ export interface ScanRowView {
   targetUrl: string | null;
   anchorText: string | null;
   status: string | null;
+  checkReason: string | null;
   httpStatus: number | null;
   finalUrl: string | null;
   responseTimeMs: number | null;
@@ -164,4 +165,10 @@ export interface DashboardSummary {
   deadLinks: number;
   issuesFound: number;
   recentScans: ScanSummary[];
+}
+
+export interface CheckBatchResponse {
+  scan: ScanSummary;
+  processed: number;
+  remaining: number;
 }
