@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
+import { SCAN_LIMITS } from '../../shared/api';
 import { INVALID_REASON_TEXT } from '../../shared/url';
+import { RequestError } from '../api/client';
 import { FileDrop } from '../components/FileDrop';
 import { Icon } from '../components/Icon';
-import { OPTIONAL_COLUMN_LABELS, type ImportResult, type SheetSummary } from '../import/backlink-import';
+import { SheetsTable } from '../components/SheetsTable';
+import { OPTIONAL_COLUMN_LABELS, type ImportResult } from '../import/backlink-import';
 import { IMPORT_ERROR_TEXT } from '../import/errors';
 import { readBacklinkFile, ReadFileError } from '../import/read-file';
+import { saveScan, tooBigForOneScan, type SaveProgress } from '../import/save-scan';
 import { clearHandedOffFile, peekHandedOffFile } from '../lib/file-handoff';
 import { formatBytes, formatNumber } from '../lib/format';
 import { checkUploadFile } from '../lib/upload-rules';
@@ -12,7 +17,7 @@ import { checkUploadFile } from '../lib/upload-rules';
 type State =
   | { kind: 'idle' }
   | { kind: 'reading'; file: File }
-  | { kind: 'preview'; result: ImportResult }
+  | { kind: 'preview'; result: ImportResult; saving?: SaveProgress; saveError?: string; scanId?: string }
   | { kind: 'error'; title: string; help: string };
 
 const MAX_INVALID_SHOWN = 200;
@@ -23,6 +28,7 @@ function stateForNewFile(file: File): State {
 }
 
 export function NewScanPage() {
+  const navigate = useNavigate();
   // A file dropped on the Dashboard starts reading straight away.
   const [state, setState] = useState<State>(() => {
     const f = peekHandedOffFile();
@@ -50,9 +56,35 @@ export function NewScanPage() {
   }, [readingFile]);
 
   const choose = (file: File) => setState(stateForNewFile(file));
-
-  const step = state.kind === 'preview' ? 1 : 0;
   const reset = () => setState({ kind: 'idle' });
+
+  async function start() {
+    if (state.kind !== 'preview' || state.saving) return;
+    const { result, scanId: resumeId } = state;
+    let createdId = resumeId;
+    const update = (patch: Partial<Extract<State, { kind: 'preview' }>>) =>
+      setState((s) => (s.kind === 'preview' && s.result === result ? { ...s, ...patch } : s));
+    update({ saving: { done: 0, total: 1 }, saveError: undefined });
+    try {
+      const id = await saveScan(result, {
+        resumeId,
+        onProgress: (p) => update({ saving: p }),
+        onCreated: (newId) => {
+          createdId = newId; // so "Start scan" again resumes this scan instead of making a new one
+        },
+      });
+      navigate(`/scans/${id}`, { state: { justSaved: true } });
+    } catch (e) {
+      update({
+        saving: undefined,
+        scanId: createdId,
+        saveError:
+          e instanceof RequestError ? e.message : 'We couldn’t save your scan. Check your connection and try again.',
+      });
+    }
+  }
+
+  const step = state.kind === 'preview' ? (state.saving ? 2 : 1) : 0;
 
   return (
     <div className="stack-lg narrow-wide">
@@ -95,14 +127,31 @@ export function NewScanPage() {
         </section>
       )}
 
-      {state.kind === 'preview' && <Preview result={state.result} onReset={reset} />}
+      {state.kind === 'preview' && (
+        <Preview
+          result={state.result}
+          saving={state.saving}
+          saveError={state.saveError}
+          onStart={start}
+          onReset={reset}
+        />
+      )}
     </div>
   );
 }
 
-function Preview({ result, onReset }: { result: ImportResult; onReset: () => void }) {
+interface PreviewProps {
+  result: ImportResult;
+  saving?: SaveProgress;
+  saveError?: string;
+  onStart: () => void;
+  onReset: () => void;
+}
+
+function Preview({ result, saving, saveError, onStart, onReset }: PreviewProps) {
   const t = result.totals;
   const invalidRows = result.rows.filter((r) => r.invalidReason);
+  const tooBig = tooBigForOneScan(result);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => headingRef.current?.focus(), []);
 
@@ -113,6 +162,7 @@ function Preview({ result, onReset }: { result: ImportResult; onReset: () => voi
     { label: 'Unique links', value: t.unique },
     { label: 'Invalid', value: t.invalid, tone: t.invalid ? 'review' : undefined },
   ];
+  const pct = saving ? Math.round((saving.done / saving.total) * 100) : 0;
 
   return (
     <>
@@ -144,17 +194,44 @@ function Preview({ result, onReset }: { result: ImportResult; onReset: () => voi
             </>
           )}
         </p>
-        <div className="file-card-actions">
-          <button type="button" className="button button-primary" disabled aria-describedby="start-hint">
-            Start scan
-          </button>
-          <button type="button" className="button button-quiet" onClick={onReset}>
-            Choose a different file
-          </button>
-        </div>
-        <p id="start-hint" className="form-hint file-card-wide">
-          Scanning arrives in the next update. Everything above is what will be checked.
-        </p>
+
+        {tooBig && (
+          <p className="notice notice-error file-card-wide" role="alert">
+            One scan can hold up to {formatNumber(SCAN_LIMITS.maxRows)} rows. Split this workbook into smaller files and
+            scan them one at a time.
+          </p>
+        )}
+        {saveError && (
+          <div className="notice notice-error file-card-wide" role="alert">
+            <p className="notice-title">{saveError}</p>
+            <p>Nothing is lost. Press Start scan again to carry on from where it stopped.</p>
+          </div>
+        )}
+
+        {saving ? (
+          <div className="saving file-card-wide" role="status" aria-live="polite">
+            <p>Saving your scan… {pct}%</p>
+            <div
+              className="progress"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={pct}
+              aria-label="Saving"
+            >
+              <span style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        ) : (
+          <div className="file-card-actions">
+            <button type="button" className="button button-primary" onClick={onStart} disabled={tooBig}>
+              Start scan
+            </button>
+            <button type="button" className="button button-quiet" onClick={onReset}>
+              Choose a different file
+            </button>
+          </div>
+        )}
       </section>
 
       <Notes result={result} />
@@ -163,35 +240,7 @@ function Preview({ result, onReset }: { result: ImportResult; onReset: () => voi
         <h2 id="sheets-heading" className="section-title">
           Worksheets
         </h2>
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">Sheet</th>
-                <th scope="col">What we did</th>
-                <th scope="col" className="num">
-                  Valid links
-                </th>
-                <th scope="col" className="num">
-                  Invalid
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.sheets.map((s) => (
-                <tr key={s.name}>
-                  <th scope="row" className="cell-strong">
-                    {s.name}
-                    {s.hidden && <span className="tag">hidden</span>}
-                  </th>
-                  <td>{sheetOutcome(s)}</td>
-                  <td className="num">{s.status === 'used' ? formatNumber(s.valid) : '—'}</td>
-                  <td className="num">{s.status === 'used' ? formatNumber(s.invalid) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <SheetsTable sheets={result.sheets} />
       </section>
 
       {invalidRows.length > 0 && (
@@ -231,12 +280,6 @@ function Preview({ result, onReset }: { result: ImportResult; onReset: () => voi
       )}
     </>
   );
-}
-
-function sheetOutcome(s: SheetSummary): string {
-  if (s.status === 'empty') return 'Skipped: the sheet is empty';
-  if (s.status === 'no-backlinks-column') return 'Skipped: no “Backlinks” column';
-  return `Read the “${s.backlinksHeader}” column (headings on row ${s.headerRow})`;
 }
 
 function Notes({ result }: { result: ImportResult }) {

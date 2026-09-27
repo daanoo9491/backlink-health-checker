@@ -17,8 +17,19 @@
     "APP_NAME": "Backlink Health Checker",
   },
 
+  // Database. Create it once with:
+  //   npx wrangler d1 create backlink-health-checker-db
+  // then paste the printed database_id below.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "backlink-health-checker-db",
+      "database_id": "PASTE-PRODUCTION-DATABASE-ID-HERE",
+      "migrations_dir": "migrations",
+    },
+  ],
+
   // Bindings added in later phases (kept here so the plan is visible):
-  //   Phase 3  -> "d1_databases"  (DB)
   //   Phase 5  -> "queues"        (SCAN_QUEUE)
   //   Phase 8  -> "r2_buckets"    (EXPORTS) if exports get large
   //   Phase 11 -> "triggers": { "crons": [...] }
@@ -26,6 +37,16 @@
   "env": {
     "staging": {
       "name": "backlink-health-checker-staging",
+      // Staging has its own database so test data never touches production:
+      //   npx wrangler d1 create backlink-health-checker-db-staging
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "backlink-health-checker-db-staging",
+          "database_id": "PASTE-STAGING-DATABASE-ID-HERE",
+          "migrations_dir": "migrations",
+        },
+      ],
       "vars": {
         "APP_ENV": "staging",
         "APP_NAME": "Backlink Health Checker (Staging)",

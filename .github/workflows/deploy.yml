@@ -25,6 +25,26 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+      - name: Check the database IDs are filled in
+        run: |
+          if grep -q "PASTE-.*-DATABASE-ID-HERE" wrangler.jsonc; then
+            echo "::error::wrangler.jsonc still has a placeholder database_id. Create the D1 databases and paste their IDs (see README → Database setup)."
+            exit 1
+          fi
+
+      - name: Apply database migrations (staging)
+        if: github.ref_name != 'main'
+        run: npx wrangler d1 migrations apply DB --remote --env staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Apply database migrations (production)
+        if: github.ref_name == 'main'
+        run: npx wrangler d1 migrations apply DB --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Build (staging)
         if: github.ref_name != 'main'
         run: npm run build

@@ -5,13 +5,18 @@ const SECRET = 's'.repeat(40);
 
 describe('session tokens', () => {
   it('round-trips a valid session', async () => {
-    const token = await signSession({ sub: 'a@b.com', exp: 2_000_000_000 }, SECRET);
-    expect(await verifySession(token, SECRET, 1_000)).toEqual({ sub: 'a@b.com', exp: 2_000_000_000 });
+    const token = await signSession({ sub: 'a@b.com', uid: 'u1', exp: 2_000_000_000 }, SECRET);
+    expect(await verifySession(token, SECRET, 1_000)).toEqual({ sub: 'a@b.com', uid: 'u1', exp: 2_000_000_000 });
   });
 
   it('rejects expired sessions', async () => {
-    const token = await signSession({ sub: 'a@b.com', exp: 100 }, SECRET);
+    const token = await signSession({ sub: 'a@b.com', uid: 'u1', exp: 100 }, SECRET);
     expect(await verifySession(token, SECRET, 101)).toBeNull();
+  });
+
+  it('rejects sessions from before user ids existed (no uid)', async () => {
+    const token = await signSession({ sub: 'a@b.com', exp: 2_000_000_000 } as never, SECRET);
+    expect(await verifySession(token, SECRET, 1_000)).toBeNull();
   });
 
   it('rejects garbage', async () => {

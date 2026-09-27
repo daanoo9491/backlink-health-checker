@@ -2,7 +2,7 @@
 
 Upload an Excel workbook of backlinks, find out which backlink pages are still live, and download the results. Built for Marketing users, hosted entirely on Cloudflare.
 
-> **Current status: Phase 2 — Excel upload.** Upload a workbook and see exactly which backlinks will be checked: every sheet is searched for a “Backlinks” column, links are validated and de-duplicated. Scanning arrives in later phases. See [docs/PHASES.md](docs/PHASES.md).
+> **Current status: Phase 3 — Database.** Upload a workbook, press Start scan, and the scan is saved to Cloudflare D1: it survives refreshes and appears in Scan history. Link checking arrives in Phase 4. See [docs/PHASES.md](docs/PHASES.md).
 
 ## Architecture
 
@@ -53,6 +53,7 @@ git clone https://github.com/<you>/backlink-health-checker.git
 cd backlink-health-checker
 npm install
 cp .dev.vars.example .dev.vars   # then edit: your sign-in email, password and a session secret
+npm run db:migrate:local         # create the tables in your local database
 npm run secret                   # prints a random SESSION_SECRET to paste into .dev.vars
 npm run dev                      # http://localhost:5173
 ```
@@ -104,7 +105,20 @@ Or from the terminal: `npx wrangler secret put AUTH_EMAIL` (add `--env staging` 
 3. Staging: `npm run deploy:staging` → creates `backlink-health-checker-staging`
 4. Verify: open `/api/health` on the deployed URL — it should return `{"status":"ok", ...}`
 
-Database, queue and bucket setup commands are added to this section in the phase that introduces them.
+### Database setup (once)
+
+Production and staging each have their own D1 database.
+
+```bash
+npx wrangler d1 create backlink-health-checker-db
+npx wrangler d1 create backlink-health-checker-db-staging
+```
+
+Each command prints a `database_id`. Paste them into `wrangler.jsonc`, replacing `PASTE-PRODUCTION-DATABASE-ID-HERE` and `PASTE-STAGING-DATABASE-ID-HERE`. Database IDs are not secrets and are committed.
+
+The GitHub API token needs **Account → D1 → Edit** permission (Cloudflare → My Profile → API Tokens → edit the token). The deploy workflow applies migrations before each deploy.
+
+Tables live in `migrations/*.sql`. Never edit a migration that has been applied; add a new numbered file instead.
 
 ## GitHub setup
 
@@ -136,7 +150,7 @@ npm test          # run once
 npm run test:watch
 ```
 
-Tests cover sign-in, sessions, CSRF, status labels, upload checks, URL validation and the Excel importer (using real workbooks in `tests/fixtures/`). They call the Hono app directly (`createApp().request(...)`), so no Worker needs to be running.
+Worker tests run against a real local D1 database (via Wrangler's `getPlatformProxy`). Tests cover sign-in, throttling, sessions, CSRF, scan saving, privacy between users, status labels, upload checks, URL validation and the Excel importer (using real workbooks in `tests/fixtures/`). They call the Hono app directly (`createApp().request(...)`), so no Worker needs to be running.
 
 ### Excel test fixtures
 

@@ -38,7 +38,6 @@ Each phase ends with: tests passing, docs updated, commit, push, deploy, verific
 
 ## Known limits after Phase 1
 
-- No login attempt limiting yet (Phase 3, backed by D1).
 - "Forgot password" tells the user to contact the administrator.
 
 ## Decisions recorded in Phase 2
@@ -50,3 +49,12 @@ Each phase ends with: tests passing, docs updated, commit, push, deploy, verific
 - **URL rules**: only http/https; `www.` links get `https://` added (and the user is told); anything else without a scheme is rejected rather than guessed. Credentials, localhost and private/link-local IPs are rejected now; Phase 4 adds DNS-level SSRF checks.
 - **Duplicates** are matched after safe normalisation only (host case, default port, trailing dot, `#fragment`). Path case, query strings and http vs https stay distinct because they can serve different pages.
 - **Limits**: 10 MB file, 100,000 rows, 256 columns, 200 MB uncompressed XML.
+
+## Decisions recorded in Phase 3
+
+- **Tables**: `users`, `scans`, `scan_rows`, `unique_urls`, `login_attempts` (`migrations/0001_initial.sql`). The spec's separate `scan_results` table is folded into `unique_urls`: each unique link is checked once and every row that points at it reads the same result. `exports` arrives with Phase 8.
+- **Saving in chunks**: `POST /api/scans` (describe) → `/urls` (2,000 per request) → `/rows` (1,000 per request) → `/complete` (verify counts). This keeps every request inside the free plan's ~10 ms CPU, 50 queries per request and 100 bound parameters per query. Each chunk is ONE `INSERT … SELECT … FROM json_each(?)` statement. Chunks are retry-safe (`INSERT OR IGNORE` on natural keys); a failed save resumes the same scan.
+- **Server-side checks**: the browser's counts are not trusted. `/complete` recounts in SQL and refuses (`409 UPLOAD_INCOMPLETE`) if anything is missing or a row points at a URL that doesn't exist. URLs are shape-checked on save (http/https only); full rules plus DNS-level SSRF checks run again before any request in Phase 4.
+- **Privacy**: every query includes the signed-in user's id; another user's scan returns 404.
+- **Sign-in**: the account now has a row in `users`; sessions carry its id (old sessions must sign in again). Throttling: 10 failures per IP or 50 per email in 15 minutes → 429.
+- **Limits**: 20,000 rows and 20,000 unique links per scan (the free plan allows ~100,000 D1 row writes per day).

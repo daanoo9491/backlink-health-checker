@@ -4,6 +4,7 @@ import type { DashboardSummary } from '../../shared/api';
 import { api, RequestError } from '../api/client';
 import { useAuth } from '../auth/auth-context';
 import { FileDrop } from '../components/FileDrop';
+import { ScanStatusBadge } from '../components/ScanStatusBadge';
 import { handOffFile } from '../lib/file-handoff';
 import { formatDate, formatNumber } from '../lib/format';
 
@@ -91,9 +92,12 @@ export function DashboardPage() {
             <ul className="recent-list">
               {data.recentScans.map((s) => (
                 <li key={s.id}>
-                  <span className="recent-name">{s.fileName}</span>
+                  <Link to={`/scans/${s.id}`} className="recent-name">
+                    {s.fileName}
+                  </Link>
                   <span className="recent-date">{formatDate(s.createdAt)}</span>
-                  <span>{formatNumber(s.urlsChecked)} links</span>
+                  <span className="recent-count">{formatNumber(s.uniqueUrls)} links</span>
+                  <ScanStatusBadge status={s.status} />
                 </li>
               ))}
             </ul>

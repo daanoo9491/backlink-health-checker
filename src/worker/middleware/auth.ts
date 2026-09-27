@@ -10,6 +10,6 @@ export const requireAuth = (): MiddlewareHandler<AppContext> => async (c, next) 
   const token = getCookie(c, SESSION_COOKIE);
   const session = secret && token ? await verifySession(token, secret) : null;
   if (!session) return apiError(c, 401, 'UNAUTHENTICATED', 'Please sign in to continue.');
-  c.set('user', { email: session.sub });
+  c.set('user', { id: session.uid, email: session.sub });
   return next();
 };

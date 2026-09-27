@@ -3,7 +3,7 @@ import { createApp } from '../../src/worker/app';
 import type { Env } from '../../src/worker/env';
 import type { ApiError, HealthResponse } from '../../src/shared/api';
 
-const env: Env = { APP_ENV: 'test', APP_NAME: 'Backlink Health Checker' };
+const env = { APP_ENV: 'test', APP_NAME: 'Backlink Health Checker' } as Env; // health needs no database
 
 describe('GET /api/health', () => {
   it('returns ok with environment info', async () => {

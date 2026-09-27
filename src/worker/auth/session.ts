@@ -9,6 +9,7 @@ export const SESSION_TTL_SECONDS = 60 * 60 * 12; // 12 hours
 
 export interface SessionPayload {
   sub: string; // user email
+  uid: string; // users.id
   exp: number; // unix seconds
 }
 
@@ -52,9 +53,11 @@ export async function verifySession(
     const ok = await crypto.subtle.verify('HMAC', await hmacKey(secret), fromBase64Url(sig), encoder.encode(body));
     if (!ok) return null;
     const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(body))) as Partial<SessionPayload>;
-    if (typeof payload.sub !== 'string' || typeof payload.exp !== 'number') return null;
+    if (typeof payload.sub !== 'string' || typeof payload.uid !== 'string' || typeof payload.exp !== 'number') {
+      return null;
+    }
     if (payload.exp <= nowSeconds) return null;
-    return { sub: payload.sub, exp: payload.exp };
+    return { sub: payload.sub, uid: payload.uid, exp: payload.exp };
   } catch {
     return null;
   }

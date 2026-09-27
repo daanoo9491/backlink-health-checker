@@ -1,6 +1,6 @@
 {
   "name": "backlink-health-checker",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Upload a backlink workbook, check which backlink pages are still alive, export the results.",
@@ -21,7 +21,10 @@
     "deploy": "npm run build && wrangler deploy",
     "deploy:staging": "cross-env CLOUDFLARE_ENV=staging npm run build && wrangler deploy",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build",
-    "secret": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\""
+    "secret": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:staging": "wrangler d1 migrations apply DB --remote --env staging",
+    "db:migrate:production": "wrangler d1 migrations apply DB --remote"
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible-next": "^5.3.0",

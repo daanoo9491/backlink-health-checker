@@ -7,6 +7,7 @@ import { csrfProtection } from './middleware/csrf';
 import { healthRoutes } from './routes/health';
 import { authRoutes } from './routes/auth';
 import { dashboardRoutes } from './routes/dashboard';
+import { scanRoutes } from './routes/scans';
 
 /**
  * The API application. Built as a factory so tests can call app.request()
@@ -22,6 +23,7 @@ export function createApp() {
   app.route('/health', healthRoutes);
   app.route('/auth', authRoutes);
   app.route('/dashboard', dashboardRoutes);
+  app.route('/scans', scanRoutes);
 
   app.notFound((c) => apiError(c, 404, 'NOT_FOUND', 'This API route does not exist.'));
 

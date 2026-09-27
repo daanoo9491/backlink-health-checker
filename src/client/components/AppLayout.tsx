@@ -23,7 +23,7 @@ export function AppLayout() {
   const { pathname } = useLocation();
   const [openFor, setOpenFor] = useState<string | null>(null);
   const menuOpen = openFor === pathname; // closes itself when the route changes
-  const title = TITLES[pathname] ?? 'Page not found';
+  const title = TITLES[pathname] ?? (/^\/scans\/[^/]+$/.test(pathname) ? 'Scan' : 'Page not found');
 
   useEffect(() => {
     document.title = `${title} · Backlink Health Checker`;

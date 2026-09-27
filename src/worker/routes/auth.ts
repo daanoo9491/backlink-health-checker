@@ -5,6 +5,8 @@ import type { LoginRequest, MeResponse } from '../../shared/api';
 import { apiError } from '../errors';
 import { requireAuth } from '../middleware/auth';
 import { SESSION_COOKIE, SESSION_TTL_SECONDS, safeEqual, signSession } from '../auth/session';
+import { clearFailures, isLockedOut, recordFailure, throttleKeys as keysFor } from '../db/login-throttle';
+import { upsertUser } from '../db/users';
 
 const MIN_SECRET_LENGTH = 32;
 
@@ -33,17 +35,26 @@ export const authRoutes = new Hono<AppContext>()
     }
 
     const email = body.email.trim().toLowerCase();
+    const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
+    const throttleKeys = keysFor(ip, email);
+    if (await isLockedOut(c.env, throttleKeys)) {
+      return apiError(c, 429, 'TOO_MANY_ATTEMPTS', 'Too many sign-in attempts. Please wait 15 minutes and try again.');
+    }
+
     // Check both fields every time so response time doesn't reveal which was wrong.
     const [emailOk, passwordOk] = await Promise.all([
       safeEqual(email, AUTH_EMAIL.trim().toLowerCase()),
       safeEqual(body.password, AUTH_PASSWORD),
     ]);
     if (!emailOk || !passwordOk) {
+      await recordFailure(c.env, throttleKeys);
       return apiError(c, 401, 'INVALID_CREDENTIALS', 'That email and password don’t match. Check them and try again.');
     }
 
+    await clearFailures(c.env, throttleKeys);
+    const uid = await upsertUser(c.env, email);
     const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
-    const token = await signSession({ sub: email, exp }, SESSION_SECRET);
+    const token = await signSession({ sub: email, uid, exp }, SESSION_SECRET);
     setCookie(c, SESSION_COOKIE, token, {
       httpOnly: true,
       secure: true,
@@ -51,7 +62,7 @@ export const authRoutes = new Hono<AppContext>()
       path: '/',
       maxAge: SESSION_TTL_SECONDS,
     });
-    return c.json<MeResponse>({ user: { email } });
+    return c.json<MeResponse>({ user: { id: uid, email } });
   })
   .post('/logout', (c) => {
     deleteCookie(c, SESSION_COOKIE, { path: '/', secure: true });
