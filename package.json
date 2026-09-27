@@ -1,6 +1,6 @@
 {
   "name": "backlink-health-checker",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "description": "Upload a backlink workbook, check which backlink pages are still alive, export the results.",

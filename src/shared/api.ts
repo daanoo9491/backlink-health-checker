@@ -151,11 +151,34 @@ export interface ScanRowView {
   checkedAt: string | null;
 }
 
+/** Status filter groups shown as buttons above the results table. */
+export const ROW_FILTER_GROUPS = ['all', 'active', 'dead', 'redirected', 'review', 'waiting', 'skipped'] as const;
+export type RowFilterGroup = (typeof ROW_FILTER_GROUPS)[number];
+
+export interface RowFilters {
+  group: RowFilterGroup;
+  /** Exact worksheet name, or '' for all. */
+  sheet: string;
+  /** HTTP status code, 'none' (no response), or '' for all. */
+  http: string;
+  /** Text to find in the backlink or target URL. */
+  q: string;
+}
+
+export interface RowFacets {
+  /** Rows per status group, with the sheet/search/HTTP filters applied. */
+  groups: Record<RowFilterGroup, number>;
+  sheets: string[];
+  httpCodes: number[];
+}
+
 export interface ScanRowsResponse {
   rows: ScanRowView[];
   page: number;
   pageSize: number;
+  /** Rows matching all filters. */
   total: number;
+  facets: RowFacets;
 }
 
 export interface DashboardSummary {

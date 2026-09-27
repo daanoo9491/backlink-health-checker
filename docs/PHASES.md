@@ -67,3 +67,8 @@ Each phase ends with: tests passing, docs updated, commit, push, deploy, verific
 - **Classification** (`src/worker/checker/classify.ts`): 2xx → Active; 2xx after a redirect to a _different_ page → Redirected; after a _same-page_ redirect (http→https, www, trailing slash) → Active, with the redirect recorded; 404/410 (also at the end of a redirect chain) → Dead; 401/403/451 and other 4xx → Blocked; 408 → Timed out; 429 → Rate limited; 5xx and redirect loops → Server error; no answer in 15 s → Timed out; connection/TLS problems and unknown domains → Could not connect ("the domain doesn't exist (it may have expired)" is called out).
 - **Politeness**: at most 4 websites at once; requests to the same website run one at a time, 0.8 s apart. Each unique link is requested once, however many rows use it.
 - **Concurrency safety**: links are reserved (`claimed_at`, migration `0002`) while being checked, so two tabs never check the same link; reservations older than 2 minutes are taken over. Scan totals are recounted from `unique_urls` after every batch.
+
+## Added after Phase 4 (brought forward from Phase 6 on request)
+
+- **Results filters** on the scan page: status buttons with row counts (All, Active, Dead, Redirected, Need a look, Waiting, Skipped; empty groups hidden), search across backlink and target URL, Sheet and HTTP-code dropdowns, Clear filters. Filtering runs in SQL across all rows, not just the visible page; user input is always bound as parameters and searched with `instr()` so `%` and `_` are literal. Filters live in the page address (`?status=dead&sheet=…`), so refresh and Back keep them.
+- Phase 6 still adds sorting, summary cards and issue categories.

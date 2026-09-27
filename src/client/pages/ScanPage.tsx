@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router';
-import type { CheckBatchResponse, ScanDetail, ScanRowsResponse, ScanRowView } from '../../shared/api';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import {
+  ROW_FILTER_GROUPS,
+  type CheckBatchResponse,
+  type RowFilterGroup,
+  type RowFilters,
+  type ScanDetail,
+  type ScanRowsResponse,
+  type ScanRowView,
+} from '../../shared/api';
 import { STATUS_INFO, type LinkStatus } from '../../shared/status';
 import { INVALID_REASON_TEXT, type InvalidReason } from '../../shared/url';
 import { api, RequestError } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { RowFilterBar } from '../components/RowFilterBar';
 import { ScanStatusBadge } from '../components/ScanStatusBadge';
 import { SheetsTable } from '../components/SheetsTable';
 import { StatusBadge } from '../components/StatusBadge';
@@ -20,7 +29,53 @@ export function ScanPage() {
 
   const [scan, setScan] = useState<ScanDetail | null>(null);
   const [rows, setRows] = useState<ScanRowsResponse | null>(null);
-  const [page, setPage] = useState(1);
+  const [params, setParams] = useSearchParams();
+
+  // Filters and page live in the address, so refresh/back keep them.
+  const page = Math.max(1, Number(params.get('page')) || 1);
+  const statusParam = params.get('status') ?? 'all';
+  const filters: RowFilters = {
+    group: (ROW_FILTER_GROUPS as readonly string[]).includes(statusParam) ? (statusParam as RowFilterGroup) : 'all',
+    sheet: params.get('sheet') ?? '',
+    http: params.get('http') ?? '',
+    q: params.get('q') ?? '',
+  };
+  const query = new URLSearchParams({
+    page: String(page),
+    pageSize: String(PAGE_SIZE),
+    ...(filters.group !== 'all' ? { status: filters.group } : {}),
+    ...(filters.sheet ? { sheet: filters.sheet } : {}),
+    ...(filters.http ? { http: filters.http } : {}),
+    ...(filters.q ? { q: filters.q } : {}),
+  }).toString();
+
+  const updateFilters = useCallback(
+    (next: Partial<RowFilters>) =>
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          const map: Record<keyof RowFilters, string> = { group: 'status', sheet: 'sheet', http: 'http', q: 'q' };
+          for (const [k, v] of Object.entries(next) as [keyof RowFilters, string][]) {
+            if (!v || v === 'all') p.delete(map[k]);
+            else p.set(map[k], v);
+          }
+          p.delete('page'); // new filters start on page 1
+          return p;
+        },
+        { replace: true },
+      ),
+    [setParams],
+  );
+  const setPage = (n: number) =>
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (n <= 1) p.delete('page');
+        else p.set('page', String(n));
+        return p;
+      },
+      { replace: true },
+    );
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -79,10 +134,14 @@ export function ScanPage() {
   }, [id]);
 
   useEffect(() => {
-    api<ScanRowsResponse>(`/scans/${id}/rows?page=${page}&pageSize=${PAGE_SIZE}`)
-      .then(setRows)
-      .catch(() => setRows(null));
-  }, [id, page, rowsVersion]);
+    let stale = false;
+    api<ScanRowsResponse>(`/scans/${id}/rows?${query}`)
+      .then((r) => !stale && setRows(r))
+      .catch(() => !stale && setRows(null));
+    return () => {
+      stale = true;
+    };
+  }, [id, query, rowsVersion]);
 
   async function handleDelete() {
     setDeleting(true);
@@ -214,14 +273,21 @@ export function ScanPage() {
         </div>
       )}
 
-      <dl className="stat-strip">
-        {stats.map((s) => (
-          <div key={s.label} className={`stat${s.tone ? ` stat-${s.tone}` : ''}`}>
-            <dt>{s.label}</dt>
-            <dd>{formatNumber(s.value)}</dd>
-          </div>
-        ))}
-      </dl>
+      <div className="stat-block">
+        <dl className="stat-strip">
+          {stats.map((s) => (
+            <div key={s.label} className={`stat${s.tone ? ` stat-${s.tone}` : ''}`}>
+              <dt>{s.label}</dt>
+              <dd>{formatNumber(s.value)}</dd>
+            </div>
+          ))}
+        </dl>
+        {started && (
+          <p className="form-hint">
+            These count unique links. The filters below count rows, so a link used on two rows counts twice there.
+          </p>
+        )}
+      </div>
 
       <section aria-labelledby="rows-heading">
         <div className="section-head">
@@ -229,11 +295,13 @@ export function ScanPage() {
             Backlinks
           </h2>
           {rows && rows.total > 0 && (
-            <p className="form-hint">
+            <p className="form-hint" aria-live="polite">
               Rows {formatNumber(from)}–{formatNumber(to)} of {formatNumber(rows.total)}
+              {rows.total !== rows.facets.groups.all || filters.group !== 'all' ? ' matching your filters' : ''}
             </p>
           )}
         </div>
+        <RowFilterBar filters={filters} facets={rows?.facets ?? null} onChange={updateFilters} />
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -258,6 +326,22 @@ export function ScanPage() {
                   </td>
                 </tr>
               )}
+              {rows && rows.rows.length === 0 && (
+                <tr>
+                  <td colSpan={6}>
+                    <div className="empty empty-inline">
+                      <p className="empty-title">No rows match these filters</p>
+                      <button
+                        type="button"
+                        className="button button-secondary button-small"
+                        onClick={() => updateFilters({ group: 'all', sheet: '', http: '', q: '' })}
+                      >
+                        Clear filters
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )}
               {rows?.rows.map((r) => (
                 <RowView key={`${r.sheet}-${r.row}`} r={r} />
               ))}
@@ -270,7 +354,7 @@ export function ScanPage() {
               type="button"
               className="button button-secondary"
               disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
+              onClick={() => setPage(page - 1)}
             >
               Previous
             </button>
@@ -281,7 +365,7 @@ export function ScanPage() {
               type="button"
               className="button button-secondary"
               disabled={to >= rows.total}
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => setPage(page + 1)}
             >
               Next
             </button>

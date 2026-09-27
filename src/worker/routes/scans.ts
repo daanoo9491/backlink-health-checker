@@ -9,7 +9,15 @@
  * value and SQLite unpacks them with json_each().
  */
 import { Hono } from 'hono';
-import type { CheckBatchResponse, CreateScanResponse, ScanListResponse, ScanRowsResponse } from '../../shared/api';
+import {
+  ROW_FILTER_GROUPS,
+  type CheckBatchResponse,
+  type CreateScanResponse,
+  type RowFilterGroup,
+  type RowFilters,
+  type ScanListResponse,
+  type ScanRowsResponse,
+} from '../../shared/api';
 import type { AppContext } from '../env';
 import { apiError } from '../errors';
 import { requireAuth } from '../middleware/auth';
@@ -172,9 +180,23 @@ scanRoutes.get('/:id/rows', async (c) => {
   if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was deleted.');
   const page = Math.max(1, Math.min(10_000, Number(c.req.query('page')) || 1));
   const pageSize = [25, 50, 100].includes(Number(c.req.query('pageSize'))) ? Number(c.req.query('pageSize')) : 50;
-  const { rows, total } = await listRows(c.env, scan.id, page, pageSize);
-  return c.json<ScanRowsResponse>({ rows, total, page, pageSize });
+  const { rows, total, facets } = await listRows(c.env, scan.id, page, pageSize, readFilters(c.req.query()));
+  return c.json<ScanRowsResponse>({ rows, total, page, pageSize, facets });
 });
+
+/** Unknown or oversized filter values are ignored rather than rejected. */
+function readFilters(q: Record<string, string>): RowFilters {
+  const group = (ROW_FILTER_GROUPS as readonly string[]).includes(q.status ?? '')
+    ? (q.status as RowFilterGroup)
+    : 'all';
+  const http = q.http === 'none' || /^[1-5]\d\d$/.test(q.http ?? '') ? q.http! : '';
+  return {
+    group,
+    sheet: (q.sheet ?? '').slice(0, 100),
+    http,
+    q: (q.q ?? '').trim().slice(0, 200),
+  };
+}
 
 scanRoutes.delete('/:id', async (c) => {
   const scan = await getScan(c.env, c.get('user')!.id, c.req.param('id'));
