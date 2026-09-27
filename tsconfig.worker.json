@@ -6,5 +6,5 @@
     "types": ["@cloudflare/workers-types"],
     "noEmit": true
   },
-  "include": ["src/worker", "src/shared", "tests"]
+  "include": ["src/worker", "src/shared"]
 }

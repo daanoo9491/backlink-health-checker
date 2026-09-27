@@ -8,8 +8,11 @@ export function handOffFile(file: File) {
   pending = file;
 }
 
-export function takeHandedOffFile(): File | null {
-  const f = pending;
+/** Read without clearing, so React may call it more than once safely. */
+export function peekHandedOffFile(): File | null {
+  return pending;
+}
+
+export function clearHandedOffFile() {
   pending = null;
-  return f;
 }

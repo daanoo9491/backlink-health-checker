@@ -40,3 +40,13 @@ Each phase ends with: tests passing, docs updated, commit, push, deploy, verific
 
 - No login attempt limiting yet (Phase 3, backed by D1).
 - "Forgot password" tells the user to contact the administrator.
+
+## Decisions recorded in Phase 2
+
+- **Workbooks are read in the browser**, in a Web Worker. Workers on the free plan get ~10 ms CPU per request, far too little to parse a large workbook. The browser does the heavy lifting; Phase 3 sends the extracted rows to the API, which re-validates every URL with the same shared rules (`src/shared/url.ts`).
+- **Own .xlsx reader** (`src/client/import/xlsx-reader.ts`, ~15 KB with `fflate`) instead of SheetJS or ExcelJS. The npm `xlsx` package is an outdated release with known vulnerabilities, and ExcelJS is ~21 MB. Our reader handles shared and inline strings, rich text, `=HYPERLINK()` formulas, inserted hyperlinks, date formats, hidden sheets and namespace prefixes, with size and row limits against zip bombs.
+- **Column detection**: a cell reading `Backlinks` or `Backlink` (any case, extra spaces, trailing colon) in the first 20 rows of a sheet is the header. Optional columns recognised: Target URL, Anchor Text, Date, Status, DA.
+- **Hyperlinked cells**: when a cell shows text like “View post” and links to a page, the link is used; the text is kept for export.
+- **URL rules**: only http/https; `www.` links get `https://` added (and the user is told); anything else without a scheme is rejected rather than guessed. Credentials, localhost and private/link-local IPs are rejected now; Phase 4 adds DNS-level SSRF checks.
+- **Duplicates** are matched after safe normalisation only (host case, default port, trailing dot, `#fragment`). Path case, query strings and http vs https stay distinct because they can serve different pages.
+- **Limits**: 10 MB file, 100,000 rows, 256 columns, 200 MB uncompressed XML.
