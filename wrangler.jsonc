@@ -24,7 +24,7 @@
     {
       "binding": "DB",
       "database_name": "backlink-health-checker-db",
-      "database_id": "PASTE-PRODUCTION-DATABASE-ID-HERE",
+      "database_id": "3328d067-f9a5-4c5f-9f5b-21e849ca90de",
       "migrations_dir": "migrations",
     },
   ],
@@ -43,7 +43,7 @@
         {
           "binding": "DB",
           "database_name": "backlink-health-checker-db-staging",
-          "database_id": "PASTE-STAGING-DATABASE-ID-HERE",
+          "database_id": "7290b7e4-a840-480a-90e4-0cccc623f850",
           "migrations_dir": "migrations",
         },
       ],
