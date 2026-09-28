@@ -194,4 +194,6 @@ export interface CheckBatchResponse {
   scan: ScanSummary;
   processed: number;
   remaining: number;
+  /** Set when nothing could be checked right now: wait this long before asking again. */
+  retryAfterMs?: number;
 }

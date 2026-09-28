@@ -18,9 +18,12 @@ import { ScanStatusBadge } from '../components/ScanStatusBadge';
 import { SheetsTable } from '../components/SheetsTable';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatBytes, formatDate, formatNumber } from '../lib/format';
+import { runCheckLoop } from '../lib/check-loop';
 import { isSafeHref } from '../lib/safe-link';
 
 const PAGE_SIZE = 50;
+/** While checking, reload the results table at most this often. */
+const ROWS_REFRESH_MS = 5_000;
 
 export function ScanPage() {
   const { id } = useParams<{ id: string }>();
@@ -103,29 +106,30 @@ export function ScanPage() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [checking]);
 
+  const lastRowsRefresh = useRef(0);
   const runChecks = useCallback(async () => {
     stopRef.current = false;
     setChecking(true);
     setCheckError(null);
-    let failures = 0;
-    while (!stopRef.current) {
-      try {
-        const r = await api<CheckBatchResponse>(`/scans/${id}/check`, { method: 'POST' });
-        failures = 0;
+    const outcome = await runCheckLoop({
+      checkBatch: () => api<CheckBatchResponse>(`/scans/${id}/check`, { method: 'POST' }),
+      onBatch: (r) => {
         setScan((prev) => (prev ? { ...prev, ...r.scan } : prev));
-        setRowsVersion((v) => v + 1);
-        if (r.remaining === 0) break;
-      } catch (e) {
-        if (e instanceof RequestError && e.status > 0 && e.status < 500 && e.status !== 429) {
-          setCheckError(e.message);
-          break;
+        // Reload the table at most every few seconds (and at the end), not after every batch.
+        const now = Date.now();
+        if (r.remaining === 0 || (r.processed > 0 && now - lastRowsRefresh.current > ROWS_REFRESH_MS)) {
+          lastRowsRefresh.current = now;
+          setRowsVersion((v) => v + 1);
         }
-        if (++failures >= 5) {
-          setCheckError('Checking paused because the connection keeps dropping. Press Continue checking to carry on.');
-          break;
-        }
-        await new Promise((res) => setTimeout(res, 1000 * 2 ** failures));
-      }
+      },
+      sleep: (ms) => new Promise((res) => setTimeout(res, ms)),
+      stopped: () => stopRef.current,
+      isFatal: (e) => e instanceof RequestError && e.status > 0 && e.status < 500 && e.status !== 429,
+    });
+    if (outcome.kind === 'fatal') {
+      setCheckError(outcome.error instanceof RequestError ? outcome.error.message : 'Checking stopped.');
+    } else if (outcome.kind === 'gave-up') {
+      setCheckError('Checking paused because the connection keeps dropping. Press Continue checking to carry on.');
     }
     setChecking(false);
   }, [id]);

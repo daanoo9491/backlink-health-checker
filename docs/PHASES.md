@@ -84,3 +84,14 @@ Each phase ends with: tests passing, docs updated, commit, push, deploy, verific
 - Old D1 scans are not migrated (staging test data only; production had not received Phase 3). The D1 databases can be deleted.
 - **Paste links**: paste links into the box on New scan (or anywhere on the page), or drag links onto the upload area or the Dashboard; the text becomes a one-sheet import ("Pasted links") validated and de-duplicated exactly like Excel, saved, and checking starts straight away. Typing or editing, then **Check N links**, also works.
 - **Start scan now starts checking** straight away (no second click). A refresh does not restart it.
+
+## Fix: runaway database usage while checking (found via D1's daily limit)
+
+A day of testing read 23.9 million D1 rows (free limit: 5 million/day). Cause: the scan page's checking loop asked again **immediately** when a batch had nothing to check (links reserved by a second tab, or by a batch that was interrupted, for up to 2 minutes). That loop could run several times a second, and every call recounted the scan and reloaded the whole results table with its filter counts. The same bug would have used up Hyperdrive's 100,000 queries/day just as quickly, so moving databases alone would not have fixed it.
+
+- The loop now waits whenever a batch checks nothing: the server returns `retryAfterMs` (5 s); otherwise 2 s, 4 s, 8 s … up to 15 s (`src/client/lib/check-loop.ts`, unit-tested).
+- An idle batch does one small count and no recount (≤ 3 queries). A normal batch returns the updated scan from its single recount query (≤ 5 queries, was 6+).
+- While checking, the results table reloads at most every 5 s and once at the end, not after every batch.
+- The Sheet filter list comes from the scan record instead of reading every row.
+- `tests/worker/query-budget.test.ts` holds each endpoint to a query budget, so this can't creep back.
+- Measured: one scan checked in two tabs at once (40 links): 10 check requests, 98 database transactions in total. Two tabs left open on a finished scan make no requests.

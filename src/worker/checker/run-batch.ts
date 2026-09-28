@@ -3,6 +3,7 @@
  * Used by POST /api/scans/:id/check now, and by the queue consumer in Phase 5.
  */
 import type { Db } from '../db/db';
+import type { ScanRecord } from '../db/scans';
 import type { Env } from '../env';
 import { BudgetExhausted, SubrequestBudget } from './budget';
 import { checkLink, type CheckResult } from './check-link';
@@ -18,7 +19,12 @@ const HOST_CONCURRENCY = 4;
 export interface BatchOutcome {
   processed: number;
   remaining: number;
+  /** The scan after this batch, when its totals were recounted (null if nothing was checked). */
+  scan: ScanRecord | null;
 }
+
+/** How long the page should wait when every waiting link is reserved by another batch. */
+export const IDLE_RETRY_MS = 5_000;
 
 interface Claimed {
   url_index: number;
@@ -68,8 +74,18 @@ export async function runCheckBatch(
     [scanId, now, now - CLAIM_STALE_SECONDS, opts.batchSize ?? BATCH_SIZE],
   );
 
+  // Nothing free to check right now (another tab or an interrupted batch holds the rest):
+  // one cheap count, no recount, and the page is told to wait before asking again.
+  if (claimed.length === 0) {
+    const [c] = await db.query<{ remaining: number }>(
+      `SELECT COUNT(*)::int AS remaining FROM unique_urls WHERE scan_id = $1 AND status IN ('PENDING', 'CHECKING')`,
+      [scanId],
+    );
+    return { processed: 0, remaining: c?.remaining ?? 0, scan: null };
+  }
+
   const results = new Map<number, CheckResult>();
-  if (claimed.length) {
+  {
     const budget = new SubrequestBudget(SUBREQUEST_LIMIT);
     const deps = {
       resolver: createResolver(),
@@ -131,7 +147,7 @@ export async function runCheckBatch(
   }
 
   // Recount the scan's totals from the source of truth and move its status on.
-  const [row] = await db.query<{ remaining: number }>(
+  const [row] = await db.query<ScanRecord & { remaining: number }>(
     `WITH c AS (
        SELECT
          COUNT(*) FILTER (WHERE status NOT IN ('PENDING', 'CHECKING'))::int AS checked,
@@ -150,8 +166,8 @@ export async function runCheckBatch(
        status = CASE WHEN c.remaining > 0 THEN 'running' ELSE 'completed' END,
        completed_at = CASE WHEN c.remaining > 0 THEN NULL ELSE $2::timestamptz END
      FROM c WHERE s.id = $1
-     RETURNING c.remaining`,
+     RETURNING s.*, c.remaining`,
     [scanId, checkedAt],
   );
-  return { processed: results.size, remaining: row?.remaining ?? 0 };
+  return { processed: results.size, remaining: row?.remaining ?? 0, scan: row ?? null };
 }

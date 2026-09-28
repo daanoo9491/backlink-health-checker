@@ -13,6 +13,7 @@
     "src/client/import/xlsx-reader.ts",
     "src/client/import/backlink-import.ts",
     "src/client/lib/upload-rules.ts",
-    "src/client/import/paste-import.ts"
+    "src/client/import/paste-import.ts",
+    "src/client/lib/check-loop.ts"
   ]
 }

@@ -22,7 +22,7 @@ import type { AppContext } from '../env';
 import { apiError } from '../errors';
 import { requireAuth } from '../middleware/auth';
 import { getScan, listRows, listScans, toDetail, toSummary } from '../db/scans';
-import { runCheckBatch } from '../checker/run-batch';
+import { IDLE_RETRY_MS, runCheckBatch } from '../checker/run-batch';
 import { parseAddRows, parseAddUrls, parseCreateScan, ValidationError } from '../validation';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -164,8 +164,12 @@ scanRoutes.post('/:id/check', async (c) => {
     return apiError(c, 409, 'NOT_READY', 'This upload didn’t finish. Delete it and upload the file again.');
   }
   const outcome = await runCheckBatch(c.get('db'), c.env, scan.id, { ownHost: new URL(c.req.url).hostname });
-  const updated = (await getScan(c.get('db'), userId, scan.id))!;
-  return c.json<CheckBatchResponse>({ scan: toSummary(updated), ...outcome });
+  return c.json<CheckBatchResponse>({
+    scan: toSummary(outcome.scan ?? scan),
+    processed: outcome.processed,
+    remaining: outcome.remaining,
+    ...(outcome.processed === 0 && outcome.remaining > 0 ? { retryAfterMs: IDLE_RETRY_MS } : {}),
+  });
 });
 
 scanRoutes.get('/:id', async (c) => {
@@ -179,7 +183,15 @@ scanRoutes.get('/:id/rows', async (c) => {
   if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was deleted.');
   const page = Math.max(1, Math.min(10_000, Number(c.req.query('page')) || 1));
   const pageSize = [25, 50, 100].includes(Number(c.req.query('pageSize'))) ? Number(c.req.query('pageSize')) : 50;
-  const { rows, total, facets } = await listRows(c.get('db'), scan.id, page, pageSize, readFilters(c.req.query()));
+  const sheetNames = scan.sheets_json.filter((s) => s.status === 'used').map((s) => s.name);
+  const { rows, total, facets } = await listRows(
+    c.get('db'),
+    scan.id,
+    page,
+    pageSize,
+    readFilters(c.req.query()),
+    sheetNames,
+  );
   return c.json<ScanRowsResponse>({ rows, total, page, pageSize, facets });
 });
 

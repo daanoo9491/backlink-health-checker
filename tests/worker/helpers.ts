@@ -37,9 +37,21 @@ async function start(): Promise<PGlite> {
   return pg;
 }
 
-function adapter(pg: PGlite): Db {
+/** Counts queries the app makes, so tests can hold each endpoint to a budget. */
+let appQueries = 0;
+export const queryCounter = {
+  reset: () => {
+    appQueries = 0;
+  },
+  get count() {
+    return appQueries;
+  },
+};
+
+function adapter(pg: PGlite, counted = false): Db {
   const db: Db = {
     async query<T>(sql: string, params: unknown[] = []) {
+      if (counted) appQueries++;
       return (await pg.query<T>(sql, params)).rows;
     },
     async transaction(fn) {
@@ -79,7 +91,7 @@ export async function testEnv(overrides: Partial<Env> = {}): Promise<Env> {
   return { ...baseEnv, ...overrides } as Env;
 }
 
-const app = createApp({ db: () => adapter(pglite!) });
+const app = createApp({ db: () => adapter(pglite!, true) });
 
 export function call(env: Env, path: string, init: RequestInit = {}) {
   return app.request(`${ORIGIN}${path}`, init, env);

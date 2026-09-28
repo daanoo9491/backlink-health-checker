@@ -146,6 +146,8 @@ export async function listRows(
   page: number,
   pageSize: number,
   filters: RowFilters,
+  /** Worksheet names, from the scan record (saves reading every row to list them). */
+  sheetNames: string[],
 ): Promise<{ rows: ScanRowView[]; total: number; facets: RowFacets }> {
   const base = baseWhere(scanId, filters);
   const where = filters.group === 'all' ? base.sql : `${base.sql} AND ${GROUP_SQL[filters.group]}`;
@@ -155,7 +157,7 @@ export async function listRows(
     .join(', ');
 
   // Independent reads: run them together over the same connection.
-  const [count, rows, facets, codes, sheets] = await Promise.all([
+  const [count, rows, facets, codes] = await Promise.all([
     db.query<{ n: number }>(`SELECT COUNT(*)::int AS n ${FROM} WHERE ${where}`, base.params),
     db.query<RowRecord>(
       `SELECT r.sheet_name, r.row_number, r.original_value, u.url, r.is_duplicate, r.invalid_reason,
@@ -175,10 +177,6 @@ export async function listRows(
        WHERE scan_id = $1 AND http_status IS NOT NULL ORDER BY http_status`,
       [scanId],
     ),
-    db.query<{ name: string }>(
-      `SELECT sheet_name AS name FROM scan_rows WHERE scan_id = $1 GROUP BY sheet_name ORDER BY MIN(seq)`,
-      [scanId],
-    ),
   ]);
 
   const f = facets[0] ?? {};
@@ -195,7 +193,7 @@ export async function listRows(
         skipped: num(f.skipped),
       },
       httpCodes: codes.map((r) => r.code),
-      sheets: sheets.map((r) => r.name),
+      sheets: sheetNames,
     },
     rows: rows.map((r) => ({
       sheet: r.sheet_name,
