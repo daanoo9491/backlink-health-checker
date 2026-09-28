@@ -8,7 +8,7 @@ import type {
   ScanSummary,
   SheetInfo,
 } from '../../shared/api';
-import type { Env } from '../env';
+import { iso, num, type Db } from './db';
 
 export interface ScanRecord {
   id: string;
@@ -17,8 +17,8 @@ export interface ScanRecord {
   file_size: number;
   status: ScanStatus;
   worksheets: number;
-  sheets_json: string;
-  headers_json: string;
+  sheets_json: SheetInfo[];
+  headers_json: string[];
   expected_rows: number;
   expected_urls: number;
   total_rows: number;
@@ -34,9 +34,9 @@ export interface ScanRecord {
   redirected_count: number;
   blocked_count: number;
   error_count: number;
-  created_at: string;
-  started_at: string | null;
-  completed_at: string | null;
+  created_at: string | Date;
+  started_at: string | Date | null;
+  completed_at: string | Date | null;
 }
 
 export function toSummary(r: ScanRecord): ScanSummary {
@@ -59,30 +59,31 @@ export function toSummary(r: ScanRecord): ScanSummary {
     redirectedCount: r.redirected_count,
     blockedCount: r.blocked_count,
     errorCount: r.error_count,
-    createdAt: r.created_at,
-    startedAt: r.started_at,
-    completedAt: r.completed_at,
+    createdAt: iso(r.created_at)!,
+    startedAt: iso(r.started_at),
+    completedAt: iso(r.completed_at),
   };
 }
 
 export function toDetail(r: ScanRecord): ScanDetail {
-  return {
-    ...toSummary(r),
-    sheets: JSON.parse(r.sheets_json) as SheetInfo[],
-    headers: JSON.parse(r.headers_json) as string[],
-  };
+  return { ...toSummary(r), sheets: r.sheets_json, headers: r.headers_json };
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Always scoped to the owner: another user's scan simply "doesn't exist". */
-export function getScan(env: Env, userId: string, scanId: string) {
-  return env.DB.prepare('SELECT * FROM scans WHERE id = ?1 AND user_id = ?2').bind(scanId, userId).first<ScanRecord>();
+export async function getScan(db: Db, userId: string, scanId: string): Promise<ScanRecord | null> {
+  if (!UUID.test(scanId)) return null; // a mistyped address is "not found", not a database error
+  const [row] = await db.query<ScanRecord>('SELECT * FROM scans WHERE id = $1 AND user_id = $2', [scanId, userId]);
+  return row ?? null;
 }
 
-export async function listScans(env: Env, userId: string, limit = 100): Promise<ScanSummary[]> {
-  const { results } = await env.DB.prepare('SELECT * FROM scans WHERE user_id = ?1 ORDER BY created_at DESC LIMIT ?2')
-    .bind(userId, limit)
-    .all<ScanRecord>();
-  return results.map(toSummary);
+export async function listScans(db: Db, userId: string, limit = 100): Promise<ScanSummary[]> {
+  const rows = await db.query<ScanRecord>('SELECT * FROM scans WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2', [
+    userId,
+    limit,
+  ]);
+  return rows.map(toSummary);
 }
 
 interface RowRecord {
@@ -90,7 +91,7 @@ interface RowRecord {
   row_number: number;
   original_value: string;
   url: string | null;
-  is_duplicate: number;
+  is_duplicate: boolean;
   invalid_reason: string | null;
   target_url: string | null;
   anchor_text: string | null;
@@ -99,7 +100,7 @@ interface RowRecord {
   http_status: number | null;
   final_url: string | null;
   response_time_ms: number | null;
-  checked_at: string | null;
+  checked_at: string | Date | null;
 }
 
 /** SQL condition for each status group (rows joined to their unique URL as "u"). */
@@ -115,36 +116,32 @@ const GROUP_SQL: Record<Exclude<RowFilterGroup, 'all'>, string> = {
 const FROM = `FROM scan_rows r LEFT JOIN unique_urls u ON u.scan_id = r.scan_id AND u.url_index = r.url_index`;
 
 /**
- * Builds the WHERE clause for everything except the status group, so the
- * group buttons can show counts that respect the other filters.
- * All user input is bound as parameters, never concatenated.
+ * WHERE clause for everything except the status group, so the group buttons
+ * can show counts that respect the other filters. User input is always a
+ * bound parameter; strpos() makes % and _ in the search text literal.
  */
 function baseWhere(scanId: string, f: RowFilters): { sql: string; params: unknown[] } {
-  const parts = ['r.scan_id = ?'];
   const params: unknown[] = [scanId];
-  if (f.sheet) {
-    parts.push('r.sheet_name = ?');
-    params.push(f.sheet);
-  }
-  if (f.http === 'none') {
-    parts.push('u.http_status IS NULL');
-  } else if (f.http) {
-    parts.push('u.http_status = ?');
-    params.push(Number(f.http));
-  }
+  const p = (v: unknown) => {
+    params.push(v);
+    return `$${params.length}`;
+  };
+  const parts = ['r.scan_id = $1'];
+  if (f.sheet) parts.push(`r.sheet_name = ${p(f.sheet)}`);
+  if (f.http === 'none') parts.push('u.http_status IS NULL');
+  else if (f.http) parts.push(`u.http_status = ${p(Number(f.http))}`);
   if (f.q) {
-    // instr() instead of LIKE, so % and _ in the search text are literal.
+    const q = p(f.q.toLowerCase());
     parts.push(
-      `(instr(lower(r.original_value), lower(?)) > 0 OR instr(lower(COALESCE(u.url, '')), lower(?)) > 0
-        OR instr(lower(COALESCE(r.target_url, '')), lower(?)) > 0)`,
+      `(strpos(lower(r.original_value), ${q}) > 0 OR strpos(lower(COALESCE(u.url, '')), ${q}) > 0
+        OR strpos(lower(COALESCE(r.target_url, '')), ${q}) > 0)`,
     );
-    params.push(f.q, f.q, f.q);
   }
   return { sql: parts.join(' AND '), params };
 }
 
 export async function listRows(
-  env: Env,
+  db: Db,
   scanId: string,
   page: number,
   pageSize: number,
@@ -152,51 +149,60 @@ export async function listRows(
 ): Promise<{ rows: ScanRowView[]; total: number; facets: RowFacets }> {
   const base = baseWhere(scanId, filters);
   const where = filters.group === 'all' ? base.sql : `${base.sql} AND ${GROUP_SQL[filters.group]}`;
+  const n = base.params.length;
   const groupCounts = Object.entries(GROUP_SQL)
-    .map(([g, cond]) => `SUM(CASE WHEN ${cond} THEN 1 ELSE 0 END) AS ${g}`)
+    .map(([g, cond]) => `COUNT(*) FILTER (WHERE ${cond})::int AS ${g}`)
     .join(', ');
 
-  const [count, rows, facets, codes, sheets] = await env.DB.batch([
-    env.DB.prepare(`SELECT COUNT(*) AS n ${FROM} WHERE ${where}`).bind(...base.params),
-    env.DB.prepare(
+  // Independent reads: run them together over the same connection.
+  const [count, rows, facets, codes, sheets] = await Promise.all([
+    db.query<{ n: number }>(`SELECT COUNT(*)::int AS n ${FROM} WHERE ${where}`, base.params),
+    db.query<RowRecord>(
       `SELECT r.sheet_name, r.row_number, r.original_value, u.url, r.is_duplicate, r.invalid_reason,
               r.target_url, r.anchor_text, u.status, u.check_reason, u.http_status, u.final_url,
               u.response_time_ms, u.checked_at
        ${FROM} WHERE ${where}
-       ORDER BY r.rowid
-       LIMIT ? OFFSET ?`,
-    ).bind(...base.params, pageSize, (page - 1) * pageSize),
-    env.DB.prepare(`SELECT COUNT(*) AS all_rows, ${groupCounts} ${FROM} WHERE ${base.sql}`).bind(...base.params),
-    env.DB.prepare(
+       ORDER BY r.seq
+       LIMIT $${n + 1} OFFSET $${n + 2}`,
+      [...base.params, pageSize, (page - 1) * pageSize],
+    ),
+    db.query<Record<string, number>>(
+      `SELECT COUNT(*)::int AS all_rows, ${groupCounts} ${FROM} WHERE ${base.sql}`,
+      base.params,
+    ),
+    db.query<{ code: number }>(
       `SELECT DISTINCT http_status AS code FROM unique_urls
-       WHERE scan_id = ?1 AND http_status IS NOT NULL ORDER BY http_status`,
-    ).bind(scanId),
-    env.DB.prepare(`SELECT DISTINCT sheet_name AS name FROM scan_rows WHERE scan_id = ?1 ORDER BY rowid`).bind(scanId),
+       WHERE scan_id = $1 AND http_status IS NOT NULL ORDER BY http_status`,
+      [scanId],
+    ),
+    db.query<{ name: string }>(
+      `SELECT sheet_name AS name FROM scan_rows WHERE scan_id = $1 GROUP BY sheet_name ORDER BY MIN(seq)`,
+      [scanId],
+    ),
   ]);
 
-  const f = facets!.results[0] as Record<string, number | null>;
-  const n = (k: string) => Number(f[k] ?? 0);
+  const f = facets[0] ?? {};
   return {
-    total: (count!.results[0] as { n: number }).n,
+    total: num(count[0]?.n),
     facets: {
       groups: {
-        all: n('all_rows'),
-        active: n('active'),
-        dead: n('dead'),
-        redirected: n('redirected'),
-        review: n('review'),
-        waiting: n('waiting'),
-        skipped: n('skipped'),
+        all: num(f.all_rows),
+        active: num(f.active),
+        dead: num(f.dead),
+        redirected: num(f.redirected),
+        review: num(f.review),
+        waiting: num(f.waiting),
+        skipped: num(f.skipped),
       },
-      httpCodes: (codes!.results as { code: number }[]).map((r) => r.code),
-      sheets: (sheets!.results as { name: string }[]).map((r) => r.name),
+      httpCodes: codes.map((r) => r.code),
+      sheets: sheets.map((r) => r.name),
     },
-    rows: (rows!.results as RowRecord[]).map((r) => ({
+    rows: rows.map((r) => ({
       sheet: r.sheet_name,
       row: r.row_number,
       value: r.original_value,
       url: r.url,
-      duplicate: r.is_duplicate === 1,
+      duplicate: r.is_duplicate,
       invalidReason: r.invalid_reason,
       targetUrl: r.target_url,
       anchorText: r.anchor_text,
@@ -205,7 +211,7 @@ export async function listRows(
       httpStatus: r.http_status,
       finalUrl: r.final_url,
       responseTimeMs: r.response_time_ms,
-      checkedAt: r.checked_at,
+      checkedAt: iso(r.checked_at),
     })),
   };
 }

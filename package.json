@@ -1,6 +1,6 @@
 {
   "name": "backlink-health-checker",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "description": "Upload a backlink workbook, check which backlink pages are still alive, export the results.",
@@ -22,14 +22,13 @@
     "deploy:staging": "cross-env CLOUDFLARE_ENV=staging npm run build && wrangler deploy",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build",
     "secret": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "db:migrate:staging": "wrangler d1 migrations apply DB --remote --env staging",
-    "db:migrate:production": "wrangler d1 migrations apply DB --remote"
+    "db:migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible-next": "^5.3.0",
     "fflate": "^0.8.3",
     "hono": "^4.13.9",
+    "pg": "^8.23.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router": "^8.4.0"
@@ -37,8 +36,10 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.59.0",
     "@cloudflare/workers-types": "^5.20260924.1",
+    "@electric-sql/pglite": "^0.5.8",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.2",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",

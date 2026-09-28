@@ -3,12 +3,17 @@ import { Icon } from './Icon';
 
 interface Props {
   onFile: (file: File) => void;
+  /** Called when links or text are dropped instead of a file. */
+  onText?: (text: string) => void;
   variant?: 'page' | 'banner';
   children: ReactNode;
 }
 
-/** Drag-and-drop area that is also a normal, keyboard-usable file picker. */
-export function FileDrop({ onFile, variant = 'page', children }: Props) {
+/**
+ * Drag-and-drop area that is also a normal, keyboard-usable file picker.
+ * Accepts an Excel file, or links dragged from a browser, email or document.
+ */
+export function FileDrop({ onFile, onText, variant = 'page', children }: Props) {
   const inputId = useId();
   const [dragging, setDragging] = useState(false);
 
@@ -16,7 +21,13 @@ export function FileDrop({ onFile, variant = 'page', children }: Props) {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file) onFile(file);
+    if (file) {
+      onFile(file);
+      return;
+    }
+    // A link dragged from a browser arrives as "text/uri-list"; selected text as "text/plain".
+    const text = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+    if (text.trim() && onText) onText(text);
   }
 
   return (

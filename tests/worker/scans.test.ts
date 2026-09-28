@@ -9,7 +9,7 @@ import type {
   ScanRowsResponse,
 } from '../../src/shared/api';
 import type { Env } from '../../src/worker/env';
-import { call, signedIn, testEnv } from './helpers';
+import { call, signedIn, sql, testEnv } from './helpers';
 
 let env: Env;
 let api: Awaited<ReturnType<typeof signedIn>>;
@@ -117,17 +117,16 @@ describe('creating a scan', () => {
     expect(page.rows[2]).toMatchObject({ row: 4, url: 'https://a.example.com/post', duplicate: true });
     expect(page.rows[3]).toMatchObject({ row: 5, url: null, invalidReason: 'NOT_A_URL', status: null });
 
-    const cells = await env.DB.prepare(`SELECT cells_json FROM scan_rows WHERE scan_id = ?1 AND row_number = 2`)
-      .bind(id)
-      .first<{ cells_json: string }>();
-    expect(JSON.parse(cells!.cells_json)).toEqual({ Backlinks: 'https://a.example.com/post', DA: '45' });
+    const [cells] = await sql<{ cells_json: unknown }>(
+      `SELECT cells_json FROM scan_rows WHERE scan_id = $1 AND row_number = 2`,
+      [id],
+    );
+    expect(cells!.cells_json).toEqual({ Backlinks: 'https://a.example.com/post', DA: '45' });
   });
 
   it('checks each unique URL once: 4 rows, only 2 URL records', async () => {
     const id = await createFullScan();
-    const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM unique_urls WHERE scan_id = ?1')
-      .bind(id)
-      .first<{ n: number }>();
+    const [n] = await sql<{ n: number }>('SELECT COUNT(*)::int AS n FROM unique_urls WHERE scan_id = $1', [id]);
     expect(n?.n).toBe(2);
   });
 
@@ -186,10 +185,24 @@ describe('creating a scan', () => {
     await api(`/api/scans/${id}/urls`, { method: 'POST', json: { offset: 0, urls: [urls[0]] } });
     const long = { ...rows[0], cells: { Notes: 'x'.repeat(5000) } };
     expect((await api(`/api/scans/${id}/rows`, { method: 'POST', json: { rows: [long] } })).status).toBe(200);
-    const r = await env.DB.prepare('SELECT cells_json FROM scan_rows WHERE scan_id = ?1')
-      .bind(id)
-      .first<{ cells_json: string }>();
-    expect((JSON.parse(r!.cells_json) as { Notes: string }).Notes).toHaveLength(1000);
+    const [r] = await sql<{ cells_json: { Notes: string } }>('SELECT cells_json FROM scan_rows WHERE scan_id = $1', [
+      id,
+    ]);
+    expect(r!.cells_json.Notes).toHaveLength(1000);
+  });
+
+  it('removes NUL characters, which Postgres cannot store', async () => {
+    const { id } = (await (
+      await api('/api/scans', { method: 'POST', json: meta({ totalRows: 1, uniqueUrls: 1 }) })
+    ).json()) as { id: string };
+    await api(`/api/scans/${id}/urls`, { method: 'POST', json: { offset: 0, urls: [urls[0]] } });
+    const bad = { ...rows[0], anchorText: 'a\u0000b', cells: { 'No\u0000tes': 'x\u0000y' } };
+    expect((await api(`/api/scans/${id}/rows`, { method: 'POST', json: { rows: [bad] } })).status).toBe(200);
+    const [r] = await sql<{ anchor_text: string; cells_json: Record<string, string> }>(
+      'SELECT anchor_text, cells_json FROM scan_rows WHERE scan_id = $1',
+      [id],
+    );
+    expect(r).toEqual({ anchor_text: 'ab', cells_json: { Notes: 'xy' } });
   });
 
   it('cannot add to a scan once it is saved', async () => {
@@ -252,9 +265,7 @@ describe('reading, listing and deleting', () => {
     expect((await api(`/api/scans/${id}`, { method: 'DELETE' })).status).toBe(200);
     expect((await api(`/api/scans/${id}`)).status).toBe(404);
     for (const t of ['scan_rows', 'unique_urls']) {
-      const n = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE scan_id = ?1`)
-        .bind(id)
-        .first<{ n: number }>();
+      const [n] = await sql<{ n: number }>(`SELECT COUNT(*)::int AS n FROM ${t} WHERE scan_id = $1`, [id]);
       expect(n?.n).toBe(0);
     }
   });

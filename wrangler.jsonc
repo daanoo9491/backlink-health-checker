@@ -17,36 +17,41 @@
     "APP_NAME": "Backlink Health Checker",
   },
 
-  // Database. Create it once with:
-  //   npx wrangler d1 create backlink-health-checker-db
-  // then paste the printed database_id below.
-  "d1_databases": [
+  // Database: Supabase Postgres, reached through Cloudflare Hyperdrive
+  // (connection pooling close to the Worker). Create it once with:
+  //   npx wrangler hyperdrive create bhc-production --connection-string="<Supabase Session pooler string>"
+  // then paste the printed id below. See README → Database setup.
+  "hyperdrive": [
     {
-      "binding": "DB",
-      "database_name": "backlink-health-checker-db",
-      "database_id": "3328d067-f9a5-4c5f-9f5b-21e849ca90de",
-      "migrations_dir": "migrations",
+      "binding": "HYPERDRIVE",
+      "id": "PASTE-PRODUCTION-HYPERDRIVE-ID-HERE",
+      // Used only by `npm run dev` on your computer.
+      "localConnectionString": "postgres://postgres:postgres@localhost:5432/postgres",
     },
   ],
+
+  // Once a day: a tiny database write so Supabase's free plan never pauses
+  // the project for inactivity, plus housekeeping of old sign-in counters.
+  "triggers": { "crons": ["17 3 * * *"] },
 
   // Bindings added in later phases (kept here so the plan is visible):
   //   Phase 5  -> "queues"        (SCAN_QUEUE)
   //   Phase 8  -> "r2_buckets"    (EXPORTS) if exports get large
-  //   Phase 11 -> "triggers": { "crons": [...] }
+  //   Phase 11 -> more cron schedules (scheduled scans)
 
   "env": {
     "staging": {
       "name": "backlink-health-checker-staging",
-      // Staging has its own database so test data never touches production:
-      //   npx wrangler d1 create backlink-health-checker-db-staging
-      "d1_databases": [
+      // Staging has its own Supabase project, so test data never touches production:
+      //   npx wrangler hyperdrive create bhc-staging --connection-string="<staging Session pooler string>"
+      "hyperdrive": [
         {
-          "binding": "DB",
-          "database_name": "backlink-health-checker-db-staging",
-          "database_id": "7290b7e4-a840-480a-90e4-0cccc623f850",
-          "migrations_dir": "migrations",
+          "binding": "HYPERDRIVE",
+          "id": "PASTE-STAGING-HYPERDRIVE-ID-HERE",
+          "localConnectionString": "postgres://postgres:postgres@localhost:5432/postgres",
         },
       ],
+      "triggers": { "crons": ["23 3 * * *"] },
       "vars": {
         "APP_ENV": "staging",
         "APP_NAME": "Backlink Health Checker (Staging)",

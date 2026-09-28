@@ -54,17 +54,16 @@ scanRoutes.onError((err, c) => {
   throw err;
 });
 
-scanRoutes.get('/', async (c) => c.json<ScanListResponse>({ scans: await listScans(c.env, c.get('user')!.id) }));
+scanRoutes.get('/', async (c) => c.json<ScanListResponse>({ scans: await listScans(c.get('db'), c.get('user')!.id) }));
 
 scanRoutes.post('/', async (c) => {
   const input = parseCreateScan(await readJson(c.req.raw));
   const id = crypto.randomUUID();
-  await c.env.DB.prepare(
+  await c.get('db').query(
     `INSERT INTO scans (id, user_id, file_name, file_size, status, worksheets, sheets_json, headers_json,
-                        expected_rows, expected_urls, blank_rows, created_at)
-     VALUES (?1, ?2, ?3, ?4, 'uploading', ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
-  )
-    .bind(
+                        expected_rows, expected_urls, blank_rows)
+     VALUES ($1, $2, $3, $4, 'uploading', $5, $6::jsonb, $7::jsonb, $8, $9, $10)`,
+    [
       id,
       c.get('user')!.id,
       input.fileName,
@@ -75,81 +74,81 @@ scanRoutes.post('/', async (c) => {
       input.totalRows,
       input.uniqueUrls,
       input.blankRows,
-      new Date().toISOString(),
-    )
-    .run();
+    ],
+  );
   return c.json<CreateScanResponse>({ id }, 201);
 });
 
 scanRoutes.post('/:id/urls', async (c) => {
-  const scan = await getScan(c.env, c.get('user')!.id, c.req.param('id'));
+  const scan = await getScan(c.get('db'), c.get('user')!.id, c.req.param('id'));
   if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist.');
   if (scan.status !== 'uploading') return apiError(c, 409, 'ALREADY_SAVED', 'This scan is already saved.');
   const { offset, urls } = parseAddUrls(await readJson(c.req.raw), scan.expected_urls);
-  await c.env.DB.prepare(
-    `INSERT OR IGNORE INTO unique_urls (scan_id, url_index, url)
-     SELECT ?1, ?2 + CAST(key AS INTEGER), value FROM json_each(?3)`,
-  )
-    .bind(scan.id, offset, JSON.stringify(urls))
-    .run();
+  await c.get('db').query(
+    `INSERT INTO unique_urls (scan_id, url_index, url)
+     SELECT $1, $2 + (t.ord - 1)::int, t.url
+     FROM jsonb_array_elements_text($3::jsonb) WITH ORDINALITY AS t(url, ord)
+     ON CONFLICT DO NOTHING`,
+    [scan.id, offset, JSON.stringify(urls)],
+  );
   return c.json({ ok: true });
 });
 
 scanRoutes.post('/:id/rows', async (c) => {
-  const scan = await getScan(c.env, c.get('user')!.id, c.req.param('id'));
+  const scan = await getScan(c.get('db'), c.get('user')!.id, c.req.param('id'));
   if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist.');
   if (scan.status !== 'uploading') return apiError(c, 409, 'ALREADY_SAVED', 'This scan is already saved.');
   const { rows } = parseAddRows(await readJson(c.req.raw), scan.expected_urls);
-  await c.env.DB.prepare(
-    `INSERT OR IGNORE INTO scan_rows (scan_id, sheet_name, row_number, original_value, url_index, is_duplicate,
-                                      invalid_reason, target_url, anchor_text, cells_json)
-     SELECT ?1,
-            json_extract(value, '$.sheet'),
-            json_extract(value, '$.row'),
-            json_extract(value, '$.value'),
-            json_extract(value, '$.urlIndex'),
-            CASE WHEN json_extract(value, '$.duplicate') THEN 1 ELSE 0 END,
-            json_extract(value, '$.invalidReason'),
-            json_extract(value, '$.targetUrl'),
-            json_extract(value, '$.anchorText'),
-            json_extract(value, '$.cells')
-     FROM json_each(?2)`,
-  )
-    .bind(scan.id, JSON.stringify(rows))
-    .run();
+  await c.get('db').query(
+    `INSERT INTO scan_rows (scan_id, sheet_name, row_number, original_value, url_index, is_duplicate,
+                           invalid_reason, target_url, anchor_text, cells_json)
+     SELECT $1, x.sheet, x.row, x.value, x."urlIndex", COALESCE(x.duplicate, false),
+            x."invalidReason", x."targetUrl", x."anchorText", COALESCE(x.cells, '{}'::jsonb)
+     FROM jsonb_to_recordset($2::jsonb) AS x(
+       sheet text, row int, value text, "urlIndex" int, duplicate boolean,
+       "invalidReason" text, "targetUrl" text, "anchorText" text, cells jsonb)
+     ON CONFLICT DO NOTHING`,
+    [scan.id, JSON.stringify(rows)],
+  );
   return c.json({ ok: true });
 });
 
 scanRoutes.post('/:id/complete', async (c) => {
-  const scan = await getScan(c.env, c.get('user')!.id, c.req.param('id'));
+  const scan = await getScan(c.get('db'), c.get('user')!.id, c.req.param('id'));
   if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist.');
   if (scan.status !== 'uploading') return c.json(toDetail(scan)); // already done: idempotent
 
-  const counts = await c.env.DB.prepare(
+  const db = c.get('db');
+  const [counts] = await db.query<{
+    urls: number;
+    rows: number;
+    valid: number;
+    invalid: number;
+    dups: number;
+    orphans: number;
+  }>(
     `SELECT
-       (SELECT COUNT(*) FROM unique_urls WHERE scan_id = ?1) AS urls,
-       (SELECT COUNT(*) FROM scan_rows WHERE scan_id = ?1) AS rows,
-       (SELECT COUNT(*) FROM scan_rows WHERE scan_id = ?1 AND url_index IS NOT NULL) AS valid,
-       (SELECT COUNT(*) FROM scan_rows WHERE scan_id = ?1 AND invalid_reason IS NOT NULL) AS invalid,
-       (SELECT COUNT(*) FROM scan_rows WHERE scan_id = ?1 AND is_duplicate = 1) AS dups,
-       (SELECT COUNT(*) FROM scan_rows r WHERE r.scan_id = ?1 AND r.url_index IS NOT NULL
+       (SELECT COUNT(*)::int FROM unique_urls WHERE scan_id = $1) AS urls,
+       (SELECT COUNT(*)::int FROM scan_rows WHERE scan_id = $1) AS rows,
+       (SELECT COUNT(*)::int FROM scan_rows WHERE scan_id = $1 AND url_index IS NOT NULL) AS valid,
+       (SELECT COUNT(*)::int FROM scan_rows WHERE scan_id = $1 AND invalid_reason IS NOT NULL) AS invalid,
+       (SELECT COUNT(*)::int FROM scan_rows WHERE scan_id = $1 AND is_duplicate) AS dups,
+       (SELECT COUNT(*)::int FROM scan_rows r WHERE r.scan_id = $1 AND r.url_index IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM unique_urls u WHERE u.scan_id = r.scan_id AND u.url_index = r.url_index)) AS orphans`,
-  )
-    .bind(scan.id)
-    .first<{ urls: number; rows: number; valid: number; invalid: number; dups: number; orphans: number }>();
+    [scan.id],
+  );
 
   if (!counts || counts.urls !== scan.expected_urls || counts.rows !== scan.expected_rows || counts.orphans > 0) {
     return apiError(c, 409, 'UPLOAD_INCOMPLETE', 'Part of the file didn’t arrive. Please try again.');
   }
 
-  const saved = await c.env.DB.prepare(
-    `UPDATE scans SET status = 'ready', total_rows = ?2, valid_urls = ?3, invalid_rows = ?4,
-                      unique_urls = ?5, duplicate_rows = ?6
-     WHERE id = ?1 AND status = 'uploading'
+  const [saved] = await db.query<typeof scan>(
+    `UPDATE scans SET status = 'ready', total_rows = $2, valid_urls = $3, invalid_rows = $4,
+                      unique_urls = $5, duplicate_rows = $6
+     WHERE id = $1 AND status = 'uploading'
      RETURNING *`,
-  )
-    .bind(scan.id, counts.rows, counts.valid, counts.invalid, counts.urls, counts.dups)
-    .first<typeof scan>();
+    [scan.id, counts.rows, counts.valid, counts.invalid, counts.urls, counts.dups],
+  );
   return c.json(toDetail(saved ?? scan));
 });
 
@@ -159,28 +158,28 @@ scanRoutes.post('/:id/complete', async (c) => {
  */
 scanRoutes.post('/:id/check', async (c) => {
   const userId = c.get('user')!.id;
-  const scan = await getScan(c.env, userId, c.req.param('id'));
+  const scan = await getScan(c.get('db'), userId, c.req.param('id'));
   if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was deleted.');
   if (scan.status === 'uploading') {
     return apiError(c, 409, 'NOT_READY', 'This upload didn’t finish. Delete it and upload the file again.');
   }
-  const outcome = await runCheckBatch(c.env, scan.id, { ownHost: new URL(c.req.url).hostname });
-  const updated = (await getScan(c.env, userId, scan.id))!;
+  const outcome = await runCheckBatch(c.get('db'), c.env, scan.id, { ownHost: new URL(c.req.url).hostname });
+  const updated = (await getScan(c.get('db'), userId, scan.id))!;
   return c.json<CheckBatchResponse>({ scan: toSummary(updated), ...outcome });
 });
 
 scanRoutes.get('/:id', async (c) => {
-  const scan = await getScan(c.env, c.get('user')!.id, c.req.param('id'));
+  const scan = await getScan(c.get('db'), c.get('user')!.id, c.req.param('id'));
   if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was deleted.');
   return c.json(toDetail(scan));
 });
 
 scanRoutes.get('/:id/rows', async (c) => {
-  const scan = await getScan(c.env, c.get('user')!.id, c.req.param('id'));
+  const scan = await getScan(c.get('db'), c.get('user')!.id, c.req.param('id'));
   if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was deleted.');
   const page = Math.max(1, Math.min(10_000, Number(c.req.query('page')) || 1));
   const pageSize = [25, 50, 100].includes(Number(c.req.query('pageSize'))) ? Number(c.req.query('pageSize')) : 50;
-  const { rows, total, facets } = await listRows(c.env, scan.id, page, pageSize, readFilters(c.req.query()));
+  const { rows, total, facets } = await listRows(c.get('db'), scan.id, page, pageSize, readFilters(c.req.query()));
   return c.json<ScanRowsResponse>({ rows, total, page, pageSize, facets });
 });
 
@@ -199,12 +198,8 @@ function readFilters(q: Record<string, string>): RowFilters {
 }
 
 scanRoutes.delete('/:id', async (c) => {
-  const scan = await getScan(c.env, c.get('user')!.id, c.req.param('id'));
+  const scan = await getScan(c.get('db'), c.get('user')!.id, c.req.param('id'));
   if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was already deleted.');
-  await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM scan_rows WHERE scan_id = ?1').bind(scan.id),
-    c.env.DB.prepare('DELETE FROM unique_urls WHERE scan_id = ?1').bind(scan.id),
-    c.env.DB.prepare('DELETE FROM scans WHERE id = ?1').bind(scan.id),
-  ]);
+  await c.get('db').query('DELETE FROM scans WHERE id = $1', [scan.id]); // rows and links cascade
   return c.json({ ok: true });
 });

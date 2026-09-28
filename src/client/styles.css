@@ -1193,3 +1193,49 @@ a:hover {
   display: grid;
   gap: 0.5rem;
 }
+
+/* ---------- Paste links ---------- */
+.paste-box {
+  display: grid;
+  gap: 0.5rem;
+}
+.paste-box .section-title {
+  margin: 0;
+}
+.or-divider {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  color: var(--ink-soft);
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.or-divider::before,
+.or-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.paste-box textarea {
+  width: 100%;
+  min-height: 7.5rem;
+  padding: 0.75rem 0.9rem;
+  font: inherit;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-s);
+  background: #fff;
+  color: var(--ink);
+  resize: vertical;
+}
+.paste-box textarea:focus-visible {
+  border-color: var(--focus);
+  outline-offset: 0;
+}
+.paste-actions {
+  display: flex;
+  justify-content: flex-start;
+}

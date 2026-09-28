@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ClipboardEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { SCAN_LIMITS } from '../../shared/api';
 import { INVALID_REASON_TEXT } from '../../shared/url';
@@ -6,21 +6,30 @@ import { RequestError } from '../api/client';
 import { FileDrop } from '../components/FileDrop';
 import { Icon } from '../components/Icon';
 import { SheetsTable } from '../components/SheetsTable';
-import { OPTIONAL_COLUMN_LABELS, type ImportResult } from '../import/backlink-import';
+import { ImportError, OPTIONAL_COLUMN_LABELS, type ImportResult } from '../import/backlink-import';
 import { IMPORT_ERROR_TEXT } from '../import/errors';
+import { extractValues, importPastedText, TooManyLinksError } from '../import/paste-import';
 import { readBacklinkFile, ReadFileError } from '../import/read-file';
 import { saveScan, tooBigForOneScan, type SaveProgress } from '../import/save-scan';
-import { clearHandedOffFile, peekHandedOffFile } from '../lib/file-handoff';
-import { formatBytes, formatNumber } from '../lib/format';
+import { clearHandOff, peekHandOff } from '../lib/file-handoff';
+import { formatBytes, formatDate, formatNumber } from '../lib/format';
 import { checkUploadFile } from '../lib/upload-rules';
 
 type State =
   | { kind: 'idle' }
   | { kind: 'reading'; file: File }
+  | { kind: 'links'; text: string; saving: SaveProgress | null }
   | { kind: 'preview'; result: ImportResult; saving?: SaveProgress; saveError?: string; scanId?: string }
   | { kind: 'error'; title: string; help: string };
 
 const MAX_INVALID_SHOWN = 200;
+
+/** Pasted/dropped text is only acted on if it looks like it contains a link. */
+const hasLink = (text: string) => /\bhttps?:\/\/|\bwww\./i.test(text);
+
+function stateForText(text: string): State {
+  return { kind: 'links', text, saving: null };
+}
 
 function stateForNewFile(file: File): State {
   const problem = checkUploadFile(file);
@@ -29,17 +38,19 @@ function stateForNewFile(file: File): State {
 
 export function NewScanPage() {
   const navigate = useNavigate();
-  // A file dropped on the Dashboard starts reading straight away.
+  // A file or links dropped on the Dashboard start straight away.
   const [state, setState] = useState<State>(() => {
-    const f = peekHandedOffFile();
-    return f ? stateForNewFile(f) : { kind: 'idle' };
+    const h = peekHandOff();
+    if (h?.kind === 'file') return stateForNewFile(h.file);
+    if (h?.kind === 'text') return stateForText(h.text);
+    return { kind: 'idle' };
   });
 
   // Whenever we enter the "reading" state, read that file in the background.
   const readingFile = state.kind === 'reading' ? state.file : null;
   useEffect(() => {
     if (!readingFile) return;
-    clearHandedOffFile();
+    clearHandOff();
     let cancelled = false; // ignore results for a file the user moved away from
     readBacklinkFile(readingFile)
       .then((result) => {
@@ -54,6 +65,75 @@ export function NewScanPage() {
       cancelled = true;
     };
   }, [readingFile]);
+
+  // Pasted or dropped links: save them as a scan and go straight to checking.
+  const linksText = state.kind === 'links' ? state.text : null;
+  useEffect(() => {
+    if (linksText === null) return;
+    clearHandOff();
+    let cancelled = false;
+    (async () => {
+      let result: ImportResult;
+      try {
+        result = importPastedText(linksText, `Pasted links, ${formatDate(new Date().toISOString())}`);
+      } catch (e) {
+        if (cancelled) return;
+        if (e instanceof TooManyLinksError) {
+          setState({
+            kind: 'error',
+            title: `That’s more than ${formatNumber(SCAN_LIMITS.maxRows)} links.`,
+            help: 'Paste them in smaller groups, or put them in an Excel sheet and upload it.',
+          });
+        } else if (e instanceof ImportError) {
+          setState({
+            kind: 'error',
+            title: 'We couldn’t find any web addresses in what you pasted.',
+            help: 'Paste full links, one per line, for example https://example.com/post.',
+          });
+        } else {
+          setState({ kind: 'error', ...IMPORT_ERROR_TEXT.UNKNOWN });
+        }
+        return;
+      }
+      try {
+        const id = await saveScan(result, {
+          onProgress: (p) => !cancelled && setState((st) => (st.kind === 'links' ? { ...st, saving: p } : st)),
+          onCreated: () => undefined,
+        });
+        if (!cancelled) navigate(`/scans/${id}`, { state: { justSaved: true, autoCheck: true } });
+      } catch (e) {
+        if (cancelled) return;
+        setState({
+          kind: 'error',
+          title: e instanceof RequestError ? e.message : 'We couldn’t save your links.',
+          help: 'Check your connection and try again.',
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [linksText, navigate]);
+
+  const acceptText = useCallback((text: string) => {
+    if (text.trim()) setState(stateForText(text));
+  }, []);
+
+  // Pasting links anywhere on the page (outside a text box) checks them at once.
+  const waiting = state.kind === 'idle' || state.kind === 'error';
+  useEffect(() => {
+    if (!waiting) return;
+    const onPaste = (e: globalThis.ClipboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.closest('input, textarea, select') || t.isContentEditable)) return;
+      const text = e.clipboardData?.getData('text') ?? '';
+      if (!hasLink(text)) return;
+      e.preventDefault();
+      acceptText(text);
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [waiting, acceptText]);
 
   const choose = (file: File) => setState(stateForNewFile(file));
   const reset = () => setState({ kind: 'idle' });
@@ -73,7 +153,7 @@ export function NewScanPage() {
           createdId = newId; // so "Start scan" again resumes this scan instead of making a new one
         },
       });
-      navigate(`/scans/${id}`, { state: { justSaved: true } });
+      navigate(`/scans/${id}`, { state: { justSaved: true, autoCheck: true } });
     } catch (e) {
       update({
         saving: undefined,
@@ -108,13 +188,28 @@ export function NewScanPage() {
               {state.help && <p>{state.help}</p>}
             </div>
           )}
-          <FileDrop onFile={choose}>
-            <p className="drop-title">{state.kind === 'error' ? 'Try another file' : 'Upload your backlink sheet'}</p>
-            <p className="drop-sub">Drag your Excel file here, or browse for it.</p>
+          <FileDrop onFile={choose} onText={acceptText}>
+            <p className="drop-title">{state.kind === 'error' ? 'Try again' : 'Upload your backlink sheet'}</p>
+            <p className="drop-sub">Drag your Excel file or links here, or browse for a file.</p>
             <p className="drop-meta">Excel workbook (.xlsx), up to 10 MB. Needs a column called “Backlinks”.</p>
           </FileDrop>
+          <PasteBox onSubmit={acceptText} />
           <SheetHelp />
         </>
+      )}
+
+      {state.kind === 'links' && (
+        <section className="panel reading" role="status" aria-live="polite">
+          <p className="file-name">Your pasted links</p>
+          <p>
+            {state.saving
+              ? `Saving… ${Math.round((state.saving.done / state.saving.total) * 100)}%`
+              : 'Reading your links…'}
+          </p>
+          <div className="progress-indeterminate" aria-hidden="true">
+            <span />
+          </div>
+        </section>
       )}
 
       {state.kind === 'reading' && (
@@ -312,6 +407,59 @@ function Notes({ result }: { result: ImportResult }) {
           <li key={n}>{n}</li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+/**
+ * Paste box: pasting links into an empty box checks them straight away;
+ * otherwise type or edit, then press "Check links" (or Ctrl+Enter).
+ */
+function PasteBox({ onSubmit }: { onSubmit: (text: string) => void }) {
+  const id = useId();
+  const hintId = useId();
+  const [text, setText] = useState('');
+  const count = text.trim() ? extractValues(text).length : 0;
+
+  function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted = e.clipboardData.getData('text');
+    if (text.trim() === '' && hasLink(pasted)) {
+      e.preventDefault();
+      setText(pasted);
+      onSubmit(pasted);
+    }
+  }
+
+  return (
+    <section className="paste-box" aria-labelledby={`${id}-label`}>
+      <div className="or-divider" aria-hidden="true">
+        <span>or</span>
+      </div>
+      <label id={`${id}-label`} htmlFor={id} className="section-title">
+        Paste links
+      </label>
+      <p id={hintId} className="form-hint">
+        One link per line. Paste into the empty box and we start checking straight away. You can also paste anywhere on
+        this page.
+      </p>
+      <textarea
+        id={id}
+        aria-describedby={hintId}
+        rows={4}
+        placeholder={'https://example.com/guest-post\nhttps://another-site.com/article'}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onPaste={onPaste}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim()) onSubmit(text);
+        }}
+        spellCheck={false}
+      />
+      <div className="paste-actions">
+        <button type="button" className="button button-primary" disabled={!count} onClick={() => onSubmit(text)}>
+          {count ? `Check ${formatNumber(count)} ${count === 1 ? 'link' : 'links'}` : 'Check links'}
+        </button>
+      </div>
     </section>
   );
 }

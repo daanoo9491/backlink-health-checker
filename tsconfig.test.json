@@ -12,6 +12,7 @@
     "src/shared",
     "src/client/import/xlsx-reader.ts",
     "src/client/import/backlink-import.ts",
-    "src/client/lib/upload-rules.ts"
+    "src/client/lib/upload-rules.ts",
+    "src/client/import/paste-import.ts"
   ]
 }

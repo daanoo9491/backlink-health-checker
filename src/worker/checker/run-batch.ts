@@ -2,6 +2,7 @@
  * Checks the next few waiting links of a scan, then updates the scan's totals.
  * Used by POST /api/scans/:id/check now, and by the queue consumer in Phase 5.
  */
+import type { Db } from '../db/db';
 import type { Env } from '../env';
 import { BudgetExhausted, SubrequestBudget } from './budget';
 import { checkLink, type CheckResult } from './check-link';
@@ -48,6 +49,7 @@ async function politely<T>(groups: T[][], run: (item: T) => Promise<void>) {
 }
 
 export async function runCheckBatch(
+  db: Db,
   env: Env,
   scanId: string,
   opts: { ownHost: string; batchSize?: number },
@@ -55,16 +57,16 @@ export async function runCheckBatch(
   const now = Math.floor(Date.now() / 1000);
 
   // Reserve the next links. Old reservations (tab closed mid-batch) are taken over.
-  const { results: claimed } = await env.DB.prepare(
-    `UPDATE unique_urls SET status = 'CHECKING', claimed_at = ?2
-     WHERE scan_id = ?1 AND url_index IN (
+  const claimed = await db.query<Claimed>(
+    `UPDATE unique_urls SET status = 'CHECKING', claimed_at = $2
+     WHERE scan_id = $1 AND url_index IN (
        SELECT url_index FROM unique_urls
-       WHERE scan_id = ?1 AND (status = 'PENDING' OR (status = 'CHECKING' AND claimed_at < ?3))
-       ORDER BY url_index LIMIT ?4)
+       WHERE scan_id = $1 AND (status = 'PENDING' OR (status = 'CHECKING' AND claimed_at < $3))
+       ORDER BY url_index LIMIT $4
+       FOR UPDATE SKIP LOCKED)
      RETURNING url_index, url`,
-  )
-    .bind(scanId, now, now - CLAIM_STALE_SECONDS, opts.batchSize ?? BATCH_SIZE)
-    .all<Claimed>();
+    [scanId, now, now - CLAIM_STALE_SECONDS, opts.batchSize ?? BATCH_SIZE],
+  );
 
   const results = new Map<number, CheckResult>();
   if (claimed.length) {
@@ -97,7 +99,7 @@ export async function runCheckBatch(
           status: r.status,
           http: r.httpStatus,
           final: r.finalUrl,
-          redirected: r.redirected ? 1 : 0,
+          redirected: r.redirected,
           ms: r.responseTimeMs,
           error: r.error,
           reason: r.reason,
@@ -107,50 +109,49 @@ export async function runCheckBatch(
   });
   const checkedAt = new Date().toISOString();
 
-  const statements = [];
   if (payload.length) {
-    statements.push(
-      env.DB.prepare(
-        `UPDATE unique_urls SET
-           status = json_extract(j.value, '$.status'),
-           http_status = json_extract(j.value, '$.http'),
-           final_url = json_extract(j.value, '$.final'),
-           redirected = COALESCE(json_extract(j.value, '$.redirected'), 0),
-           response_time_ms = json_extract(j.value, '$.ms'),
-           error_message = json_extract(j.value, '$.error'),
-           check_reason = json_extract(j.value, '$.reason'),
-           attempts = attempts + json_extract(j.value, '$.counted'),
-           checked_at = CASE WHEN json_extract(j.value, '$.counted') = 1 THEN ?3 ELSE checked_at END,
-           claimed_at = NULL
-         FROM json_each(?2) AS j
-         WHERE unique_urls.scan_id = ?1 AND unique_urls.url_index = json_extract(j.value, '$.i')`,
-      ).bind(scanId, JSON.stringify(payload), checkedAt),
+    await db.query(
+      `UPDATE unique_urls u SET
+         status = j.status,
+         http_status = j.http,
+         final_url = j.final,
+         redirected = COALESCE(j.redirected, false),
+         response_time_ms = j.ms,
+         error_message = j.error,
+         check_reason = j.reason,
+         attempts = u.attempts + j.counted,
+         checked_at = CASE WHEN j.counted = 1 THEN $3::timestamptz ELSE u.checked_at END,
+         claimed_at = NULL
+       FROM jsonb_to_recordset($2::jsonb) AS j(
+         i int, status text, http int, final text, redirected boolean, ms int,
+         error text, reason text, counted int)
+       WHERE u.scan_id = $1 AND u.url_index = j.i`,
+      [scanId, JSON.stringify(payload), checkedAt],
     );
   }
+
   // Recount the scan's totals from the source of truth and move its status on.
-  statements.push(
-    env.DB.prepare(
-      `UPDATE scans SET
-         checked_count   = (SELECT COUNT(*) FROM unique_urls WHERE scan_id = ?1 AND status NOT IN ('PENDING', 'CHECKING')),
-         active_count    = (SELECT COUNT(*) FROM unique_urls WHERE scan_id = ?1 AND status = 'ACTIVE'),
-         dead_count      = (SELECT COUNT(*) FROM unique_urls WHERE scan_id = ?1 AND status = 'DEAD'),
-         soft_404_count  = (SELECT COUNT(*) FROM unique_urls WHERE scan_id = ?1 AND status = 'SOFT_404'),
-         redirected_count= (SELECT COUNT(*) FROM unique_urls WHERE scan_id = ?1 AND status = 'REDIRECTED'),
-         blocked_count   = (SELECT COUNT(*) FROM unique_urls WHERE scan_id = ?1 AND status = 'BLOCKED'),
-         error_count     = (SELECT COUNT(*) FROM unique_urls WHERE scan_id = ?1
-                              AND status IN ('RATE_LIMITED', 'SERVER_ERROR', 'TIMEOUT', 'NETWORK_ERROR')),
-         started_at      = COALESCE(started_at, ?2),
-         status = CASE WHEN EXISTS (SELECT 1 FROM unique_urls WHERE scan_id = ?1 AND status IN ('PENDING', 'CHECKING'))
-                       THEN 'running' ELSE 'completed' END,
-         completed_at = CASE WHEN EXISTS (SELECT 1 FROM unique_urls WHERE scan_id = ?1 AND status IN ('PENDING', 'CHECKING'))
-                       THEN NULL ELSE ?2 END
-       WHERE id = ?1`,
-    ).bind(scanId, checkedAt),
-    env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM unique_urls WHERE scan_id = ?1 AND status IN ('PENDING', 'CHECKING')`,
-    ).bind(scanId),
+  const [row] = await db.query<{ remaining: number }>(
+    `WITH c AS (
+       SELECT
+         COUNT(*) FILTER (WHERE status NOT IN ('PENDING', 'CHECKING'))::int AS checked,
+         COUNT(*) FILTER (WHERE status = 'ACTIVE')::int AS active,
+         COUNT(*) FILTER (WHERE status = 'DEAD')::int AS dead,
+         COUNT(*) FILTER (WHERE status = 'SOFT_404')::int AS soft404,
+         COUNT(*) FILTER (WHERE status = 'REDIRECTED')::int AS redirected,
+         COUNT(*) FILTER (WHERE status = 'BLOCKED')::int AS blocked,
+         COUNT(*) FILTER (WHERE status IN ('RATE_LIMITED', 'SERVER_ERROR', 'TIMEOUT', 'NETWORK_ERROR'))::int AS errors,
+         COUNT(*) FILTER (WHERE status IN ('PENDING', 'CHECKING'))::int AS remaining
+       FROM unique_urls WHERE scan_id = $1)
+     UPDATE scans s SET
+       checked_count = c.checked, active_count = c.active, dead_count = c.dead, soft_404_count = c.soft404,
+       redirected_count = c.redirected, blocked_count = c.blocked, error_count = c.errors,
+       started_at = COALESCE(s.started_at, $2::timestamptz),
+       status = CASE WHEN c.remaining > 0 THEN 'running' ELSE 'completed' END,
+       completed_at = CASE WHEN c.remaining > 0 THEN NULL ELSE $2::timestamptz END
+     FROM c WHERE s.id = $1
+     RETURNING c.remaining`,
+    [scanId, checkedAt],
   );
-  const out = await env.DB.batch(statements);
-  const remaining = (out[out.length - 1]!.results[0] as { n: number }).n;
-  return { processed: results.size, remaining };
+  return { processed: results.size, remaining: row?.remaining ?? 0 };
 }

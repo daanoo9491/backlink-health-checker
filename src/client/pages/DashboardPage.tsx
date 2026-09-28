@@ -5,7 +5,7 @@ import { api, RequestError } from '../api/client';
 import { useAuth } from '../auth/auth-context';
 import { FileDrop } from '../components/FileDrop';
 import { ScanStatusBadge } from '../components/ScanStatusBadge';
-import { handOffFile } from '../lib/file-handoff';
+import { handOffFile, handOffText } from '../lib/file-handoff';
 import { formatDate, formatNumber } from '../lib/format';
 
 function firstName(email: string) {
@@ -45,9 +45,13 @@ export function DashboardPage() {
           handOffFile(f);
           navigate('/scans/new');
         }}
+        onText={(t) => {
+          handOffText(t);
+          navigate('/scans/new');
+        }}
       >
         <p className="drop-title">Upload backlink Excel</p>
-        <p className="drop-sub">Drop your .xlsx file here. We’ll find the “Backlinks” column for you.</p>
+        <p className="drop-sub">Drop your .xlsx file or links here. We’ll find the backlinks for you.</p>
       </FileDrop>
 
       {error && (

@@ -72,3 +72,15 @@ Each phase ends with: tests passing, docs updated, commit, push, deploy, verific
 
 - **Results filters** on the scan page: status buttons with row counts (All, Active, Dead, Redirected, Need a look, Waiting, Skipped; empty groups hidden), search across backlink and target URL, Sheet and HTTP-code dropdowns, Clear filters. Filtering runs in SQL across all rows, not just the visible page; user input is always bound as parameters and searched with `instr()` so `%` and `_` are literal. Filters live in the page address (`?status=dead&sheet=…`), so refresh and Back keep them.
 - Phase 6 still adds sorting, summary cards and issue categories.
+
+## Changed after Phase 4: database moved to Supabase; paste links
+
+- **Database: Cloudflare D1 → Supabase Postgres, via Cloudflare Hyperdrive** (on request). Hyperdrive pools connections near the Worker, and its queries count against Cloudflare's 1,000 internal-service limit, not the free plan's 50 external subrequests per invocation, so link checking keeps its full request budget. Free plan: 100,000 Hyperdrive queries per day.
+- Driver: `pg` (node-postgres ≥ 8.16.3, as Cloudflare requires), one lazily opened connection per request, closed after the response. Everything goes through a small `Db` interface (`src/worker/db/db.ts`); tests use PGlite (real Postgres in-process) behind the same interface.
+- Schema `migrations/001_initial.sql`: same tables as before, Postgres-native (`uuid`, `timestamptz`, `jsonb`, `boolean`; an identity column keeps workbook order). Bulk inserts use `jsonb_array_elements_text`/`jsonb_to_recordset`; link reservations use `FOR UPDATE SKIP LOCKED`. Migrations run with `scripts/migrate.mjs` (tracked in `schema_migrations`), from CI before each deploy.
+- **Supabase web API closed**: RLS on every table with no policies, and all rights revoked from `anon`/`authenticated`.
+- **Keep-alive**: daily Cron Trigger writes a heartbeat so the free project is never paused; it also clears expired sign-in counters.
+- Scan ids that aren't valid UUIDs return 404 before reaching the database; NUL characters (which Postgres can't store) are stripped from uploaded cells.
+- Old D1 scans are not migrated (staging test data only; production had not received Phase 3). The D1 databases can be deleted.
+- **Paste links**: paste links into the box on New scan (or anywhere on the page), or drag links onto the upload area or the Dashboard; the text becomes a one-sheet import ("Pasted links") validated and de-duplicated exactly like Excel, saved, and checking starts straight away. Typing or editing, then **Check N links**, also works.
+- **Start scan now starts checking** straight away (no second click). A refresh does not restart it.

@@ -25,7 +25,10 @@ const PAGE_SIZE = 50;
 export function ScanPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const justSaved = (useLocation().state as { justSaved?: boolean } | null)?.justSaved === true;
+  const location = useLocation();
+  const navState = location.state as { justSaved?: boolean; autoCheck?: boolean } | null;
+  const justSaved = navState?.justSaved === true;
+  const autoCheckRef = useRef(navState?.autoCheck === true);
 
   const [scan, setScan] = useState<ScanDetail | null>(null);
   const [rows, setRows] = useState<ScanRowsResponse | null>(null);
@@ -126,6 +129,16 @@ export function ScanPage() {
     }
     setChecking(false);
   }, [id]);
+
+  // Coming straight from "Start scan" or pasted links: start checking by itself, once.
+  // (The flag is cleared from the page history so a refresh doesn't restart it.)
+  const scanStatus = scan?.status;
+  useEffect(() => {
+    if (!autoCheckRef.current || (scanStatus !== 'ready' && scanStatus !== 'running')) return;
+    autoCheckRef.current = false;
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: { justSaved: true } });
+    void runChecks();
+  }, [scanStatus, runChecks, navigate, location.pathname, location.search]);
 
   useEffect(() => {
     api<ScanDetail>(`/scans/${id}`)

@@ -4,6 +4,9 @@ import { apiError } from './errors';
 import { securityHeaders } from './middleware/security-headers';
 import { requestId } from './middleware/request-id';
 import { csrfProtection } from './middleware/csrf';
+import { database } from './middleware/database';
+import type { DbFactory } from './db/db';
+import { pgDb } from './db/pg';
 import { healthRoutes } from './routes/health';
 import { authRoutes } from './routes/auth';
 import { dashboardRoutes } from './routes/dashboard';
@@ -11,14 +14,15 @@ import { scanRoutes } from './routes/scans';
 
 /**
  * The API application. Built as a factory so tests can call app.request()
- * without a running Worker.
+ * without a running Worker, and swap in a test database.
  */
-export function createApp() {
+export function createApp(opts: { db?: DbFactory } = {}) {
   const app = new Hono<AppContext>().basePath('/api');
 
   app.use('*', requestId());
   app.use('*', securityHeaders());
   app.use('*', csrfProtection());
+  app.use('*', database(opts.db ?? pgDb));
 
   app.route('/health', healthRoutes);
   app.route('/auth', authRoutes);

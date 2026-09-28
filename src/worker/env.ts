@@ -1,3 +1,5 @@
+import type { Db } from './db/db';
+
 /**
  * Worker bindings and secrets. Extend as later phases add resources:
  *   Phase 5: SCAN_QUEUE: Queue
@@ -7,7 +9,8 @@ export interface Env {
   APP_ENV: string;
   APP_NAME: string;
   ASSETS?: Fetcher;
-  DB: D1Database;
+  /** Supabase Postgres, reached through Cloudflare Hyperdrive. */
+  HYPERDRIVE: Hyperdrive;
 
   // Secrets — set in Cloudflare (Worker → Settings → Variables and Secrets)
   // or locally in .dev.vars. The account row itself lives in the users table.
@@ -22,6 +25,7 @@ export interface Env {
 export interface AppVariables {
   requestId: string;
   user?: { id: string; email: string };
+  db: Db;
 }
 
 export type AppContext = { Bindings: Env; Variables: AppVariables };

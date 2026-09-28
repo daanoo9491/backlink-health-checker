@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getPlatformProxy } from 'wrangler';
+import { PGlite } from '@electric-sql/pglite';
 import { afterAll } from 'vitest';
 import { createApp } from '../../src/worker/app';
+import type { Db } from '../../src/worker/db/db';
 import type { Env } from '../../src/worker/env';
 
 export const ORIGIN = 'https://bhc.test';
@@ -13,56 +14,75 @@ const baseEnv = {
   AUTH_EMAIL: 'Marketing@Example.com',
   AUTH_PASSWORD: 'correct horse battery staple',
   SESSION_SECRET: 'x'.repeat(40),
+  HYPERDRIVE: { connectionString: 'postgres://test' } as Hyperdrive,
 };
 
-const disposers: (() => Promise<void>)[] = [];
+let pglite: PGlite | null = null;
+let ready: Promise<PGlite> | null = null;
+
 afterAll(async () => {
-  await Promise.all(disposers.map((d) => d()));
+  await pglite?.close();
 });
 
-/** Strips SQL comments and splits a migration file into statements. */
-function statements(sql: string): string[] {
-  return sql
-    .split('\n')
-    .map((l) => l.replace(/--.*$/, ''))
-    .join('\n')
-    .split(';')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-let shared: Promise<D1Database> | null = null;
-
-async function startDb(): Promise<D1Database> {
-  // Same local D1 engine as `wrangler dev`, in memory (persist: false).
-  const proxy = await getPlatformProxy<{ DB: D1Database }>({ configPath: 'wrangler.jsonc', persist: false });
-  disposers.push(() => proxy.dispose());
-  const db = proxy.env.DB;
+/** A real Postgres (PGlite, in-process) with the same migrations as Supabase. One per test file. */
+async function start(): Promise<PGlite> {
+  const pg = new PGlite();
   const dir = join(__dirname, '..', '..', 'migrations');
   for (const file of readdirSync(dir)
     .filter((f) => f.endsWith('.sql'))
     .sort()) {
-    await db.batch(statements(readFileSync(join(dir, file), 'utf8')).map((s) => db.prepare(s)));
+    await pg.exec(readFileSync(join(dir, file), 'utf8'));
   }
+  pglite = pg;
+  return pg;
+}
+
+function adapter(pg: PGlite): Db {
+  const db: Db = {
+    async query<T>(sql: string, params: unknown[] = []) {
+      return (await pg.query<T>(sql, params)).rows;
+    },
+    async transaction(fn) {
+      await pg.query('BEGIN');
+      try {
+        const out = await fn(db);
+        await pg.query('COMMIT');
+        return out;
+      } catch (e) {
+        await pg.query('ROLLBACK');
+        throw e;
+      }
+    },
+    async close() {
+      /* shared for the whole test file */
+    },
+  };
   return db;
 }
 
-/** A migrated, empty D1 database (real D1 engine, run locally). One per test file, wiped per call. */
-export async function freshDb(): Promise<D1Database> {
-  shared ??= startDb();
-  const db = await shared;
-  await db.batch(
-    ['scan_rows', 'unique_urls', 'scans', 'users', 'login_attempts'].map((t) => db.prepare(`DELETE FROM ${t}`)),
-  );
-  return db;
+/** The test database, emptied. */
+export async function freshDb(): Promise<Db> {
+  ready ??= start();
+  const pg = await ready;
+  await pg.exec('TRUNCATE users, scans, unique_urls, scan_rows, login_attempts, heartbeat CASCADE');
+  return adapter(pg);
+}
+
+/** Run SQL directly against the test database (for assertions and setup). */
+export async function sql<T = Record<string, unknown>>(query: string, params: unknown[] = []): Promise<T[]> {
+  const pg = await (ready ??= start());
+  return (await pg.query<T>(query, params)).rows;
 }
 
 export async function testEnv(overrides: Partial<Env> = {}): Promise<Env> {
-  return { ...baseEnv, DB: await freshDb(), ...overrides } as Env;
+  await freshDb();
+  return { ...baseEnv, ...overrides } as Env;
 }
 
+const app = createApp({ db: () => adapter(pglite!) });
+
 export function call(env: Env, path: string, init: RequestInit = {}) {
-  return createApp().request(`${ORIGIN}${path}`, init, env);
+  return app.request(`${ORIGIN}${path}`, init, env);
 }
 
 export function login(env: Env, email: string, password: string, opts: { origin?: string; ip?: string } = {}) {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { ApiError, MeResponse } from '../../src/shared/api';
 import type { Env } from '../../src/worker/env';
 import { MAX_FAILURES_PER_IP } from '../../src/worker/db/login-throttle';
-import { call, cookieFrom, EMAIL, login, ORIGIN, PASSWORD, testEnv } from './helpers';
+import { call, cookieFrom, EMAIL, login, ORIGIN, PASSWORD, sql, testEnv } from './helpers';
 
 let env: Env;
 beforeEach(async () => {
@@ -26,7 +26,7 @@ describe('POST /api/auth/login', () => {
     // Second sign-in reuses the same user row.
     const again = (await (await login(env, EMAIL, PASSWORD)).json()) as MeResponse;
     expect(again.user.id).toBe(me.user.id);
-    const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first<{ n: number }>();
+    const [count] = await sql<{ n: number }>('SELECT COUNT(*)::int AS n FROM users');
     expect(count?.n).toBe(1);
   });
 

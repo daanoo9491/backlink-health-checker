@@ -37,7 +37,7 @@ export const authRoutes = new Hono<AppContext>()
     const email = body.email.trim().toLowerCase();
     const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
     const throttleKeys = keysFor(ip, email);
-    if (await isLockedOut(c.env, throttleKeys)) {
+    if (await isLockedOut(c.get('db'), throttleKeys)) {
       return apiError(c, 429, 'TOO_MANY_ATTEMPTS', 'Too many sign-in attempts. Please wait 15 minutes and try again.');
     }
 
@@ -47,12 +47,12 @@ export const authRoutes = new Hono<AppContext>()
       safeEqual(body.password, AUTH_PASSWORD),
     ]);
     if (!emailOk || !passwordOk) {
-      await recordFailure(c.env, throttleKeys);
+      await recordFailure(c.get('db'), throttleKeys);
       return apiError(c, 401, 'INVALID_CREDENTIALS', 'That email and password don’t match. Check them and try again.');
     }
 
-    await clearFailures(c.env, throttleKeys);
-    const uid = await upsertUser(c.env, email);
+    await clearFailures(c.get('db'), throttleKeys);
+    const uid = await upsertUser(c.get('db'), email);
     const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
     const token = await signSession({ sub: email, uid, exp }, SESSION_SECRET);
     setCookie(c, SESSION_COOKIE, token, {

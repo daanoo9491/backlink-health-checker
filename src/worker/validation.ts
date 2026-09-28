@@ -18,8 +18,10 @@ const fail = (msg: string): never => {
   throw new ValidationError(msg);
 };
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+/** Postgres can't store the NUL character; it never belongs in a spreadsheet cell anyway. */
+const clean = (v: string) => (v.includes('\u0000') ? v.split('\u0000').join('') : v);
 const str = (v: unknown, max: number, what: string): string =>
-  typeof v === 'string' && v.length <= max ? v : fail(`${what} is invalid`);
+  typeof v === 'string' && v.length <= max ? clean(v) : fail(`${what} is invalid`);
 const optStr = (v: unknown, max: number, what: string): string | undefined =>
   v === undefined || v === null ? undefined : str(v, max, what);
 const int = (v: unknown, min: number, max: number, what: string): number =>
@@ -124,7 +126,7 @@ function parseRow(v: unknown, uniqueTotal: number): ScanRowInput {
   for (const [k, val] of entries) {
     if (k.length > 255 || typeof val !== 'string') fail('cell');
     // Long cells are trimmed rather than rejected: they are only kept for export.
-    row.cells[k] = (val as string).slice(0, SCAN_LIMITS.maxCellLength);
+    row.cells[clean(k)] = clean(val as string).slice(0, SCAN_LIMITS.maxCellLength);
   }
   return row;
 }

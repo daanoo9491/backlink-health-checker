@@ -6,6 +6,10 @@ AUTH_PASSWORD=choose-a-strong-password
 # At least 32 random characters. Generate one with: npm run secret
 SESSION_SECRET=replace-with-at-least-32-random-characters
 
+# The local database for `npm run dev` is set in wrangler.jsonc
+# ("localConnectionString"): a Postgres on your computer, e.g. `supabase start`
+# or Docker, then `DATABASE_URL=… npm run db:migrate`.
+
 # Optional, local development only: skip the DNS safety check if your network
 # blocks https://cloudflare-dns.com. Ignored unless APP_ENV=development.
 # APP_ENV=development

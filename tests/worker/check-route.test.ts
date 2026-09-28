@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CheckBatchResponse, ScanDetail, ScanRowsResponse } from '../../src/shared/api';
 import type { Env } from '../../src/worker/env';
 import { fakeInternet } from './fake-net';
-import { call, cookieFrom, ORIGIN, signedIn, testEnv } from './helpers';
+import { call, cookieFrom, ORIGIN, signedIn, sql, testEnv } from './helpers';
 
 let env: Env;
 let api: Awaited<ReturnType<typeof signedIn>>;
@@ -114,20 +114,17 @@ describe('POST /api/scans/:id/check', () => {
     const r = (await (await api(`/api/scans/${id}/check`, { method: 'POST' })).json()) as CheckBatchResponse;
     expect(r.processed).toBeLessThan(8);
     expect(r.remaining).toBe(8 - r.processed);
-    const pending = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM unique_urls WHERE scan_id = ?1 AND status = 'PENDING' AND claimed_at IS NULL`,
-    )
-      .bind(id)
-      .first<{ n: number }>();
+    const [pending] = await sql<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM unique_urls WHERE scan_id = $1 AND status = 'PENDING' AND claimed_at IS NULL`,
+      [id],
+    );
     expect(pending?.n).toBe(r.remaining);
   });
 
   it('takes over links abandoned mid-check (e.g. tab closed)', async () => {
     fakeInternet({ 'z.example.com': PUBLIC }, { 'https://z.example.com/': { status: 200 } });
     const id = await makeScan(['https://z.example.com/']);
-    await env.DB.prepare(`UPDATE unique_urls SET status = 'CHECKING', claimed_at = 1 WHERE scan_id = ?1`)
-      .bind(id)
-      .run();
+    await sql(`UPDATE unique_urls SET status = 'CHECKING', claimed_at = 1 WHERE scan_id = $1`, [id]);
     const r = (await (await api(`/api/scans/${id}/check`, { method: 'POST' })).json()) as CheckBatchResponse;
     expect(r.scan.status).toBe('completed');
     expect(r.scan.activeCount).toBe(1);
@@ -137,9 +134,7 @@ describe('POST /api/scans/:id/check', () => {
     const net = fakeInternet({ 'y.example.com': PUBLIC }, { 'https://y.example.com/': { status: 200 } });
     const id = await makeScan(['https://y.example.com/']);
     const now = Math.floor(Date.now() / 1000);
-    await env.DB.prepare(`UPDATE unique_urls SET status = 'CHECKING', claimed_at = ?2 WHERE scan_id = ?1`)
-      .bind(id, now)
-      .run();
+    await sql(`UPDATE unique_urls SET status = 'CHECKING', claimed_at = $2 WHERE scan_id = $1`, [id, now]);
     const r = (await (await api(`/api/scans/${id}/check`, { method: 'POST' })).json()) as CheckBatchResponse;
     expect(r.processed).toBe(0);
     expect(r.remaining).toBe(1);
