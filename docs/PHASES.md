@@ -95,3 +95,7 @@ A day of testing read 23.9 million D1 rows (free limit: 5 million/day). Cause: t
 - The Sheet filter list comes from the scan record instead of reading every row.
 - `tests/worker/query-budget.test.ts` holds each endpoint to a query budget, so this can't creep back.
 - Measured: one scan checked in two tabs at once (40 links): 10 check requests, 98 database transactions in total. Two tabs left open on a finished scan make no requests.
+
+## One-off: copy old D1 scans into Supabase
+
+`scripts/import-from-d1.mjs` (`npm run import:d1 -- --from staging`). Reads D1 with `wrangler d1 execute --json` through a temporary config (no API token needed beyond `wrangler login`), keyset-paged 500 rows at a time to keep D1 reads low, and writes each scan in a single Postgres transaction with a count check before commit. Users are matched by email; scan ids, results, timestamps, row order and original cells are kept. Idempotent (existing scans skipped). Tested against a local D1 built from the old migrations: a 404-row and a 1,200-row scan (paging), duplicates, invalid rows, Unicode cells, an interrupted check, an unfinished upload (skipped), and an account that already existed on the new database.

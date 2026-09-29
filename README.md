@@ -137,6 +137,16 @@ The deploy workflow runs `npm run db:migrate` before each deploy. Tables live in
 
 **Security:** every table has row level security switched on with no policies, and Supabase's `anon`/`authenticated` roles have no rights. Supabase's public web API therefore can't read anything, even with the project's anon key. The app connects directly, as the database owner, through Hyperdrive.
 
+**Copying old scans from D1 (one-off):** scans saved while the app used Cloudflare D1 can be copied into Supabase:
+
+```powershell
+$env:DATABASE_URL="<Session pooler string for the SAME environment>"
+npm run import:d1 -- --from staging --dry-run   # shows what would be copied
+npm run import:d1 -- --from staging             # copies
+```
+
+It reads D1 through your `npx wrangler login`, matches users by email (scans attach to the account you already use on the new database), copies each scan in one transaction and checks the counts before saving it. Running it again skips scans already copied. Unfinished uploads are left out; links that were mid-check become "waiting" so checking can continue.
+
 **Keep-alive:** Supabase pauses free projects after about a week without activity. A daily Cron Trigger (`triggers.crons` in `wrangler.jsonc`) writes one row to `heartbeat`, so the project stays awake even when nobody uses the app.
 
 **Local development:** `npm run dev` connects to the `localConnectionString` in `wrangler.jsonc` (`postgres://postgres:postgres@localhost:5432/postgres`). Run a Postgres there (for example `supabase start`, or Docker `postgres:16`), then `DATABASE_URL=… npm run db:migrate`.
