@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { freshDb, sql } from './helpers';
+
+// Start the database before the tests, so its start-up time isn't counted against the first test.
+beforeAll(async () => {
+  await freshDb();
+});
 
 describe('Postgres test database', () => {
   it('applies the migration and supports the bulk-insert pattern', async () => {
