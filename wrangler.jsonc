@@ -24,7 +24,7 @@
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "PASTE-PRODUCTION-HYPERDRIVE-ID-HERE",
+      "id": "6580a4db664d4394af7f45f3668c6612",
       // Used only by `npm run dev` on your computer.
       "localConnectionString": "postgres://postgres:postgres@localhost:5432/postgres",
     },
@@ -47,7 +47,7 @@
       "hyperdrive": [
         {
           "binding": "HYPERDRIVE",
-          "id": "PASTE-STAGING-HYPERDRIVE-ID-HERE",
+          "id": "28e1151b1a4349499e7eac877c4760d5",
           "localConnectionString": "postgres://postgres:postgres@localhost:5432/postgres",
         },
       ],
