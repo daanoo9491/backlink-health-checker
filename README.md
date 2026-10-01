@@ -2,7 +2,7 @@
 
 Upload an Excel workbook of backlinks (or just paste links), find out which backlink pages are still live, and download the results. Built for Marketing users. The app runs on Cloudflare; data is stored in Supabase Postgres.
 
-> **Current status: Phase 4 + Supabase.** Upload a workbook or paste links; every unique link is checked once and classified (Active, Dead, Redirected, Blocked, Rate limited, Server error, Timed out, Could not connect), with SSRF protection on every request and redirect. Data lives in Supabase Postgres, reached through Cloudflare Hyperdrive. Checking runs while the scan page is open; background checking arrives in Phase 5. See [docs/PHASES.md](docs/PHASES.md).
+> **Current status: Phase 5 (background checking).** Upload a workbook or paste links; every unique link is checked once and classified (Active, Dead, Redirected, Blocked, Rate limited, Server error, Timed out, Could not connect), with SSRF protection on every request and redirect. Checking runs in the background on Cloudflare Queues, so you can close the browser; temporary failures are retried automatically, and a scan can be paused and resumed. Data lives in Supabase Postgres, reached through Cloudflare Hyperdrive. See [docs/PHASES.md](docs/PHASES.md).
 
 ## Architecture
 
@@ -14,7 +14,9 @@ Browser ──► Cloudflare Worker
              └── /*      → React SPA (src/client, served as static assets)
 
 Daily Cron Trigger ──► keep-alive write (stops Supabase's free plan pausing the project)
-Later phases add:  Queues (background scans) · R2 (large exports) · more Cron schedules
+             Queue `bhc-checks` ──► same Worker (queue consumer): one message = 8 links
+             Cron every 10 min ──► restart stalled scans · keep Supabase awake
+Later phases add:  R2 (large exports) · scheduled rechecks
 ```
 
 | Layer           | Technology                                                |
@@ -22,7 +24,7 @@ Later phases add:  Queues (background scans) · R2 (large exports) · more Cron 
 | Frontend        | React 19, Vite, TypeScript                                |
 | Backend         | Cloudflare Workers, Hono                                  |
 | Database        | Supabase Postgres via Cloudflare Hyperdrive (`pg` driver) |
-| Background jobs | Cloudflare Queues (Phase 5)                               |
+| Background jobs | Cloudflare Queues + a 10-minute Cron safety net           |
 | Tests           | Vitest                                                    |
 | Quality         | ESLint, Prettier, strict TypeScript                       |
 | CI/CD           | GitHub Actions + Wrangler                                 |
@@ -131,7 +133,18 @@ Each prints an `id`. Paste them into `wrangler.jsonc`, replacing `PASTE-PRODUCTI
 
 **4. Add GitHub secrets** so the deploy can create and update tables: `SUPABASE_DB_URL_PRODUCTION` and `SUPABASE_DB_URL_STAGING` (the same Session pooler strings).
 
-**5. Cloudflare API token:** add **Account → Hyperdrive → Edit** to the token GitHub uses (the D1 permission is no longer needed).
+**5. Cloudflare API token:** add **Account → Hyperdrive → Edit** and **Account → Queues → Edit** to the token GitHub uses (the D1 permission is no longer needed).
+
+### Queue setup (once, Phase 5)
+
+Checking runs in the background on Cloudflare Queues (included in the free plan: 10,000 operations a day, about 3 per batch of 8 links, so roughly 25,000 links a day). Create the two queues once:
+
+```bash
+npx wrangler queues create bhc-checks
+npx wrangler queues create bhc-checks-staging
+```
+
+`wrangler.jsonc` already connects each Worker to its queue as both sender and consumer.
 
 The deploy workflow runs `npm run db:migrate` before each deploy. Tables live in `migrations/*.sql`; applied files are recorded in `schema_migrations`. Never edit an applied migration; add a new numbered file instead.
 
@@ -147,9 +160,9 @@ npm run import:d1 -- --from staging             # copies
 
 It reads D1 through your `npx wrangler login`, matches users by email (scans attach to the account you already use on the new database), copies each scan in one transaction and checks the counts before saving it. Running it again skips scans already copied. Unfinished uploads are left out; links that were mid-check become "waiting" so checking can continue.
 
-**Keep-alive:** Supabase pauses free projects after about a week without activity. A daily Cron Trigger (`triggers.crons` in `wrangler.jsonc`) writes one row to `heartbeat`, so the project stays awake even when nobody uses the app.
+**Cron (every 10 minutes):** restarts any scan whose background chain went quiet for 10 minutes (e.g. a message that failed all its retries), and writes one row to `heartbeat`. Supabase pauses free projects after about a week without activity, so this also keeps the project awake.
 
-**Local development:** `npm run dev` connects to the `localConnectionString` in `wrangler.jsonc` (`postgres://postgres:postgres@localhost:5432/postgres`). Run a Postgres there (for example `supabase start`, or Docker `postgres:16`), then `DATABASE_URL=… npm run db:migrate`.
+**Local development:** `npm run dev` connects to the `localConnectionString` in `wrangler.jsonc` (`postgres://postgres:postgres@localhost:5432/postgres`). Run a Postgres there (for example `supabase start`, or Docker `postgres:16`), then `DATABASE_URL=… npm run db:migrate`. Queues run locally inside `npm run dev` with no setup.
 
 ## GitHub setup
 
@@ -160,7 +173,7 @@ It reads D1 through your `npx wrangler login`, matches users by email (scans att
    git push -u origin main
    git push -u origin development
    ```
-3. Create a Cloudflare API token: Cloudflare dashboard → My Profile → API Tokens → **Create Token** → template **Edit Cloudflare Workers**, then add **Account → Hyperdrive → Edit**. (Phase 5 will also need Queues edit permission.)
+3. Create a Cloudflare API token: Cloudflare dashboard → My Profile → API Tokens → **Create Token** → template **Edit Cloudflare Workers**, then add **Account → Hyperdrive → Edit** and **Account → Queues → Edit**.
 4. Add repo secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `SUPABASE_DB_URL_PRODUCTION` and `SUPABASE_DB_URL_STAGING` (Account ID is on the Workers & Pages overview page).
 5. Optional but recommended: Settings → Branches → protect `main` and require the **CI / check** status to pass.
 

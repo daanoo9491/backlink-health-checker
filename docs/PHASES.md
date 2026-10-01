@@ -99,3 +99,23 @@ A day of testing read 23.9 million D1 rows (free limit: 5 million/day). Cause: t
 ## One-off: copy old D1 scans into Supabase
 
 `scripts/import-from-d1.mjs` (`npm run import:d1 -- --from staging`). Reads D1 with `wrangler d1 execute --json` through a temporary config (no API token needed beyond `wrangler login`), keyset-paged 500 rows at a time to keep D1 reads low, and writes each scan in a single Postgres transaction with a count check before commit. Users are matched by email; scan ids, results, timestamps, row order and original cells are kept. Idempotent (existing scans skipped). Tested against a local D1 built from the old migrations: a 404-row and a 1,200-row scan (paging), duplicates, invalid rows, Unicode cells, an interrupted check, an unfinished upload (skipped), and an account that already existed on the new database.
+
+## Decisions recorded in Phase 5 (background checking)
+
+Checking moved from the browser to the server, on Cloudflare Queues. Closing the tab, the laptop going to sleep or losing Wi-Fi no longer stops a scan.
+
+- **One message = one batch of 8 links.** After each batch the consumer sends the next message for the same scan, so each scan runs as one chain: politeness to websites is unchanged (4 sites at once, 0.8 s between requests to the same site) and each invocation stays inside the free plan's 50-request limit.
+- **Chain token.** Start mints a new `chain_id`; messages carrying an older one are dropped. A double click, two tabs, or Pause → Resume can never run two chains for one scan. Start does nothing while a chain has reported in during the last 3 minutes.
+- **Pause / Resume.** Pause clears the chain (the queued message is dropped on arrival); a batch already running finishes and keeps the scan paused. Resume starts a new chain from where it stopped.
+- **Automatic retries.** Timeouts, 429, 5xx, dropped connections and failed DNS look-ups (not "domain doesn't exist") are retried up to 3 attempts in total: after 1 minute, then 4 (or the site's `Retry-After`, capped at 15 minutes). Until the last attempt the link keeps its latest result, shows "Trying again automatically soon", and counts as still to do. While only retries are waiting the chain sleeps (delayed message, 5 s – 5 min) instead of polling.
+- **Request budget.** If no link in a batch could finish within the request budget (e.g. long redirect chains checked side by side), the next batch takes one link at a time, so a scan can't get stuck.
+- **Safety net.** A Cron Trigger every 10 minutes restarts scans that are queued/running but haven't reported in for 10 minutes (heartbeat), up to 20 per run. Paused and finished scans are left alone. A message that throws is retried by the queue (30 s, up to 3 times) before the safety net steps in.
+- **Scan page** polls the scan every 4 s while it is checking (not when the tab is hidden) and reloads the table at most every 12 s. It shows a Pause / Resume button and, if a scan hasn't moved for 3 minutes, a "Restart now" button.
+- **Usage per batch:** ≤ 5 database queries and 1 message (~3 queue operations). An idle wake-up: ≤ 3 queries. Enforced by `tests/worker/query-budget.test.ts`.
+- **Endpoints:** `POST /api/scans/:id/start` and `POST /api/scans/:id/pause` replace `POST /api/scans/:id/check`. New scan statuses: `paused`; migration `002_background.sql` adds `chain_id`, `heartbeat_at`, `app_host` to scans and `retry_at` to links.
+- **App host.** The queue consumer has no incoming request, so Start records the app's hostname on the scan; the checker still refuses to request the app itself.
+
+## Known limits after Phase 5
+
+- Free Queues plan: about 25,000 links a day across all scans. Messages are kept 24 hours; anything older is picked up by the Cron safety net.
+- A link that keeps failing temporarily is shown with its last error after 3 attempts; "Check again" for single links comes with rechecks (Phase 14).

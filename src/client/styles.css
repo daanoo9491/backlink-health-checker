@@ -1239,3 +1239,10 @@ a:hover {
   display: flex;
   justify-content: flex-start;
 }
+
+/* ---------- Phase 5: background checking ---------- */
+.check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}

@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   ROW_FILTER_GROUPS,
-  type CheckBatchResponse,
   type RowFilterGroup,
   type RowFilters,
   type ScanDetail,
   type ScanRowsResponse,
   type ScanRowView,
+  type ScanSummary,
 } from '../../shared/api';
 import { STATUS_INFO, type LinkStatus } from '../../shared/status';
 import { INVALID_REASON_TEXT, type InvalidReason } from '../../shared/url';
@@ -18,12 +18,15 @@ import { ScanStatusBadge } from '../components/ScanStatusBadge';
 import { SheetsTable } from '../components/SheetsTable';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatBytes, formatDate, formatNumber } from '../lib/format';
-import { runCheckLoop } from '../lib/check-loop';
 import { isSafeHref } from '../lib/safe-link';
 
 const PAGE_SIZE = 50;
-/** While checking, reload the results table at most this often. */
-const ROWS_REFRESH_MS = 5_000;
+/** While checking runs, how often the page asks for progress (one small query). */
+const POLL_MS = 4_000;
+/** …and how often it reloads the results table when something changed. */
+const ROWS_REFRESH_MS = 12_000;
+/** No progress for this long while running = probably stalled (the server restarts it too). */
+const STALLED_MS = 3 * 60_000;
 
 export function ScanPage() {
   const { id } = useParams<{ id: string }>();
@@ -85,64 +88,66 @@ export function ScanPage() {
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [checking, setChecking] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [rowsVersion, setRowsVersion] = useState(0);
-  const stopRef = useRef(false);
+  const [now, setNow] = useState(() => Date.now());
 
-  // Stop the checking loop when the user leaves the page.
-  useEffect(
-    () => () => {
-      stopRef.current = true;
+  const control = useCallback(
+    async (action: 'start' | 'pause') => {
+      setBusy(true);
+      setCheckError(null);
+      try {
+        const s = await api<ScanSummary>(`/scans/${id}/${action}`, { method: 'POST' });
+        setScan((prev) => (prev ? { ...prev, ...s } : prev));
+      } catch (e) {
+        setCheckError(e instanceof RequestError ? e.message : 'That didn’t work. Check your connection and try again.');
+      } finally {
+        setBusy(false);
+      }
     },
-    [],
+    [id],
   );
 
-  // Warn before closing the tab while checking (checking pauses until they return).
+  // While checking runs in the background, follow its progress. One small
+  // request every few seconds; the table reloads only when something changed.
+  const scanStatus = scan?.status;
+  const active = scanStatus === 'queued' || scanStatus === 'running';
+  const lastRows = useRef({ at: 0, checked: -1 });
   useEffect(() => {
-    if (!checking) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [checking]);
-
-  const lastRowsRefresh = useRef(0);
-  const runChecks = useCallback(async () => {
-    stopRef.current = false;
-    setChecking(true);
-    setCheckError(null);
-    const outcome = await runCheckLoop({
-      checkBatch: () => api<CheckBatchResponse>(`/scans/${id}/check`, { method: 'POST' }),
-      onBatch: (r) => {
-        setScan((prev) => (prev ? { ...prev, ...r.scan } : prev));
-        // Reload the table at most every few seconds (and at the end), not after every batch.
-        const now = Date.now();
-        if (r.remaining === 0 || (r.processed > 0 && now - lastRowsRefresh.current > ROWS_REFRESH_MS)) {
-          lastRowsRefresh.current = now;
+    if (!active) return;
+    let stopped = false;
+    const timer = setInterval(async () => {
+      if (stopped || document.hidden) return; // no polling from a background tab
+      try {
+        const s = await api<ScanDetail>(`/scans/${id}`);
+        if (stopped) return;
+        setScan(s);
+        setNow(Date.now());
+        const done = s.status !== 'queued' && s.status !== 'running';
+        const changed = s.checkedCount !== lastRows.current.checked;
+        if (done || (changed && Date.now() - lastRows.current.at > ROWS_REFRESH_MS)) {
+          lastRows.current = { at: Date.now(), checked: s.checkedCount };
           setRowsVersion((v) => v + 1);
         }
-      },
-      sleep: (ms) => new Promise((res) => setTimeout(res, ms)),
-      stopped: () => stopRef.current,
-      isFatal: (e) => e instanceof RequestError && e.status > 0 && e.status < 500 && e.status !== 429,
-    });
-    if (outcome.kind === 'fatal') {
-      setCheckError(outcome.error instanceof RequestError ? outcome.error.message : 'Checking stopped.');
-    } else if (outcome.kind === 'gave-up') {
-      setCheckError('Checking paused because the connection keeps dropping. Press Continue checking to carry on.');
-    }
-    setChecking(false);
-  }, [id]);
+      } catch {
+        /* temporary network problem: try again on the next tick */
+      }
+    }, POLL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [active, id]);
 
   // Coming straight from "Start scan" or pasted links: start checking by itself, once.
   // (The flag is cleared from the page history so a refresh doesn't restart it.)
-  const scanStatus = scan?.status;
   useEffect(() => {
-    if (!autoCheckRef.current || (scanStatus !== 'ready' && scanStatus !== 'running')) return;
+    if (!autoCheckRef.current || scanStatus !== 'ready') return;
     autoCheckRef.current = false;
     navigate(`${location.pathname}${location.search}`, { replace: true, state: { justSaved: true } });
-    void runChecks();
-  }, [scanStatus, runChecks, navigate, location.pathname, location.search]);
+    void control('start');
+  }, [scanStatus, control, navigate, location.pathname, location.search]);
 
   useEffect(() => {
     api<ScanDetail>(`/scans/${id}`)
@@ -206,7 +211,12 @@ export function ScanPage() {
         { label: 'Checked', value: scan.checkedCount },
       ];
   const pct = scan.uniqueUrls ? Math.round((scan.checkedCount / scan.uniqueUrls) * 100) : 0;
-  const canCheck = scan.status === 'ready' || scan.status === 'running';
+  const showPanel = ['ready', 'queued', 'running', 'paused'].includes(scan.status);
+  const allTried = scan.checkedCount >= scan.uniqueUrls;
+  const stalled =
+    (scan.status === 'queued' || scan.status === 'running') &&
+    !!scan.heartbeatAt &&
+    now - Date.parse(scan.heartbeatAt) > STALLED_MS;
 
   const from = rows && rows.total ? (rows.page - 1) * rows.pageSize + 1 : 0;
   const to = rows ? Math.min(rows.page * rows.pageSize, rows.total) : 0;
@@ -232,18 +242,20 @@ export function ScanPage() {
         </p>
       )}
 
-      {canCheck && (
+      {showPanel && (
         <section className="panel check-panel" aria-labelledby="check-heading">
-          <h2 id="check-heading" className="section-title">
-            {checking
-              ? `Checking links… ${formatNumber(scan.checkedCount)} of ${formatNumber(scan.uniqueUrls)}`
-              : scan.status === 'running'
-                ? `${formatNumber(scan.checkedCount)} of ${formatNumber(scan.uniqueUrls)} links checked`
-                : justSaved
-                  ? 'Your scan is saved. Ready to check the links?'
-                  : 'Ready to check the links'}
+          <h2 id="check-heading" className="section-title" aria-live="polite">
+            {scan.status === 'ready'
+              ? justSaved
+                ? 'Your scan is saved. Ready to check the links?'
+                : 'Ready to check the links'
+              : scan.status === 'paused'
+                ? `Paused at ${formatNumber(scan.checkedCount)} of ${formatNumber(scan.uniqueUrls)} links`
+                : allTried
+                  ? 'Retrying the links that failed temporarily…'
+                  : `Checking links… ${formatNumber(scan.checkedCount)} of ${formatNumber(scan.uniqueUrls)}`}
           </h2>
-          {(checking || scan.status === 'running') && (
+          {scan.status !== 'ready' && (
             <div
               className="progress"
               role="progressbar"
@@ -256,22 +268,41 @@ export function ScanPage() {
             </div>
           )}
           <p className="form-hint">
-            {checking
-              ? 'Keep this page open while we check. If you leave, checking pauses and you can continue later.'
-              : `We’ll open each of the ${formatNumber(scan.uniqueUrls)} unique links once. Keep this page open while it runs.`}
+            {scan.status === 'paused'
+              ? 'Nothing is being checked. Resume to carry on from where it stopped.'
+              : `Checking runs on our servers, so you can close this page and come back later. Timeouts and server errors are retried automatically.`}
           </p>
+          {stalled && (
+            <p className="notice notice-error" role="status">
+              Checking seems to have stopped. It restarts by itself within about 20 minutes, or you can restart it now.
+            </p>
+          )}
           {checkError && (
             <p className="notice notice-error" role="alert">
               {checkError}
             </p>
           )}
-          {!checking && (
-            <div>
-              <button type="button" className="button button-primary" onClick={runChecks}>
-                {scan.status === 'running' ? 'Continue checking' : 'Start checking'}
+          <div className="check-actions">
+            {(scan.status === 'ready' || scan.status === 'paused' || stalled) && (
+              <button type="button" className="button button-primary" disabled={busy} onClick={() => control('start')}>
+                {scan.status === 'ready'
+                  ? 'Start checking'
+                  : scan.status === 'paused'
+                    ? 'Resume checking'
+                    : 'Restart now'}
               </button>
-            </div>
-          )}
+            )}
+            {(scan.status === 'queued' || scan.status === 'running') && (
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={busy}
+                onClick={() => control('pause')}
+              >
+                Pause
+              </button>
+            )}
+          </div>
         </section>
       )}
       {scan.status === 'completed' && (
@@ -455,6 +486,7 @@ function RowView({ r }: { r: ScanRowView }) {
           <>
             <StatusBadge status={status} />
             {checked && r.checkReason && <span className="check-reason">{r.checkReason}</span>}
+            {r.retryAt && <span className="check-reason">Trying again automatically soon</span>}
           </>
         ) : (
           <span className="skipped">

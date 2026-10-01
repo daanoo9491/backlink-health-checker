@@ -30,12 +30,20 @@
     },
   ],
 
-  // Once a day: a tiny database write so Supabase's free plan never pauses
-  // the project for inactivity, plus housekeeping of old sign-in counters.
-  "triggers": { "crons": ["17 3 * * *"] },
+  // Background checking. Create the queue once with:
+  //   npx wrangler queues create bhc-checks
+  // One message = one batch of up to 8 links; batch size 1 keeps each run
+  // inside the free plan's 50 outgoing requests.
+  "queues": {
+    "producers": [{ "binding": "SCAN_QUEUE", "queue": "bhc-checks" }],
+    "consumers": [{ "queue": "bhc-checks", "max_batch_size": 1, "max_batch_timeout": 0, "max_retries": 3 }],
+  },
+
+  // Every 10 minutes: restart any scan whose background checking stalled,
+  // and a tiny database write so Supabase's free plan never pauses the project.
+  "triggers": { "crons": ["*/10 * * * *"] },
 
   // Bindings added in later phases (kept here so the plan is visible):
-  //   Phase 5  -> "queues"        (SCAN_QUEUE)
   //   Phase 8  -> "r2_buckets"    (EXPORTS) if exports get large
   //   Phase 11 -> more cron schedules (scheduled scans)
 
@@ -51,7 +59,12 @@
           "localConnectionString": "postgres://postgres:postgres@localhost:5432/postgres",
         },
       ],
-      "triggers": { "crons": ["23 3 * * *"] },
+      //   npx wrangler queues create bhc-checks-staging
+      "queues": {
+        "producers": [{ "binding": "SCAN_QUEUE", "queue": "bhc-checks-staging" }],
+        "consumers": [{ "queue": "bhc-checks-staging", "max_batch_size": 1, "max_batch_timeout": 0, "max_retries": 3 }],
+      },
+      "triggers": { "crons": ["*/10 * * * *"] },
       "vars": {
         "APP_ENV": "staging",
         "APP_NAME": "Backlink Health Checker (Staging)",

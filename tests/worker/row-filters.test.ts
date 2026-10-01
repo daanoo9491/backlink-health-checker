@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScanRowsResponse } from '../../src/shared/api';
 import type { Env } from '../../src/worker/env';
 import { fakeInternet } from './fake-net';
-import { signedIn, testEnv } from './helpers';
+import { drain, signedIn, testEnv } from './helpers';
 
 let env: Env;
 let api: Awaited<ReturnType<typeof signedIn>>;
@@ -75,7 +75,8 @@ beforeEach(async () => {
   await api(`/api/scans/${id}/urls`, { method: 'POST', json: { offset: 0, urls: URLS } });
   await api(`/api/scans/${id}/rows`, { method: 'POST', json: { rows } });
   await api(`/api/scans/${id}/complete`, { method: 'POST' });
-  for (let i = 0; i < 3; i++) await api(`/api/scans/${id}/check`, { method: 'POST' });
+  await api(`/api/scans/${id}/start`, { method: 'POST' });
+  await drain(env);
 });
 
 const get = async (qs: string) => (await (await api(`/api/scans/${id}/rows?${qs}`)).json()) as ScanRowsResponse;

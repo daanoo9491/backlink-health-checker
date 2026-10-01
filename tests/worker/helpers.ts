@@ -5,6 +5,7 @@ import { afterAll } from 'vitest';
 import { createApp } from '../../src/worker/app';
 import type { Db } from '../../src/worker/db/db';
 import type { Env } from '../../src/worker/env';
+import { processScanMessage, type MessageOutcome, type QueueLike, type ScanMessage } from '../../src/worker/queue';
 
 export const ORIGIN = 'https://bhc.test';
 
@@ -86,9 +87,37 @@ export async function sql<T = Record<string, unknown>>(query: string, params: un
   return (await pg.query<T>(query, params)).rows;
 }
 
+/** An in-memory stand-in for the Cloudflare queue: records every message sent. */
+export class FakeQueue implements QueueLike {
+  sent: { body: ScanMessage; delaySeconds: number }[] = [];
+  async send(body: ScanMessage, options?: { delaySeconds?: number }) {
+    this.sent.push({ body, delaySeconds: options?.delaySeconds ?? 0 });
+  }
+}
+
 export async function testEnv(overrides: Partial<Env> = {}): Promise<Env> {
   await freshDb();
-  return { ...baseEnv, ...overrides } as Env;
+  return { ...baseEnv, SCAN_QUEUE: new FakeQueue(), ...overrides } as unknown as Env;
+}
+
+export const queueOf = (env: Env) => env.SCAN_QUEUE as unknown as FakeQueue;
+
+/** The database as the queue consumer sees it (queries counted). */
+export const consumerDb = () => adapter(pglite!, true);
+
+/**
+ * Plays the queue consumer: delivers waiting messages one at a time (ignoring
+ * their delays) until the queue is empty or `max` messages were handled.
+ */
+export async function drain(env: Env, max = 50): Promise<MessageOutcome[]> {
+  const q = queueOf(env);
+  const out: MessageOutcome[] = [];
+  while (out.length < max) {
+    const msg = q.sent.shift();
+    if (!msg) break;
+    out.push(await processScanMessage(consumerDb(), env, q, msg.body));
+  }
+  return out;
 }
 
 const app = createApp({ db: () => adapter(pglite!, true) });

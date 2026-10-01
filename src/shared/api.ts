@@ -35,7 +35,7 @@ export interface LoginRequest {
 
 // ---------- Scans ----------
 
-export const SCAN_STATUSES = ['uploading', 'ready', 'queued', 'running', 'completed', 'failed'] as const;
+export const SCAN_STATUSES = ['uploading', 'ready', 'queued', 'running', 'paused', 'completed', 'failed'] as const;
 export type ScanStatus = (typeof SCAN_STATUSES)[number];
 
 export interface SheetInfo {
@@ -123,6 +123,8 @@ export interface ScanSummary {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  /** Last sign of life from background checking (null before it starts). */
+  heartbeatAt: string | null;
 }
 
 export interface ScanDetail extends ScanSummary {
@@ -145,6 +147,8 @@ export interface ScanRowView {
   anchorText: string | null;
   status: string | null;
   checkReason: string | null;
+  /** Set while a temporary failure waits for its automatic retry. */
+  retryAt: string | null;
   httpStatus: number | null;
   finalUrl: string | null;
   responseTimeMs: number | null;
@@ -188,12 +192,4 @@ export interface DashboardSummary {
   deadLinks: number;
   issuesFound: number;
   recentScans: ScanSummary[];
-}
-
-export interface CheckBatchResponse {
-  scan: ScanSummary;
-  processed: number;
-  remaining: number;
-  /** Set when nothing could be checked right now: wait this long before asking again. */
-  retryAfterMs?: number;
 }

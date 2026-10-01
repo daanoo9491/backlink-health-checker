@@ -11,7 +11,6 @@
 import { Hono } from 'hono';
 import {
   ROW_FILTER_GROUPS,
-  type CheckBatchResponse,
   type CreateScanResponse,
   type RowFilterGroup,
   type RowFilters,
@@ -22,7 +21,7 @@ import type { AppContext } from '../env';
 import { apiError } from '../errors';
 import { requireAuth } from '../middleware/auth';
 import { getScan, listRows, listScans, toDetail, toSummary } from '../db/scans';
-import { IDLE_RETRY_MS, runCheckBatch } from '../checker/run-batch';
+import { pauseChecking, startChecking } from '../queue';
 import { parseAddRows, parseAddUrls, parseCreateScan, ValidationError } from '../validation';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -153,23 +152,27 @@ scanRoutes.post('/:id/complete', async (c) => {
 });
 
 /**
- * Checks the next batch of links. The scan page calls this repeatedly while
- * it is open (Phase 5 moves this to a background queue).
+ * Starts (or resumes) checking in the background. Safe to press twice: if a
+ * chain is already running, nothing new is started.
  */
-scanRoutes.post('/:id/check', async (c) => {
-  const userId = c.get('user')!.id;
-  const scan = await getScan(c.get('db'), userId, c.req.param('id'));
+scanRoutes.post('/:id/start', async (c) => {
+  const db = c.get('db');
+  const scan = await getScan(db, c.get('user')!.id, c.req.param('id'));
   if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was deleted.');
   if (scan.status === 'uploading') {
     return apiError(c, 409, 'NOT_READY', 'This upload didn’t finish. Delete it and upload the file again.');
   }
-  const outcome = await runCheckBatch(c.get('db'), c.env, scan.id, { ownHost: new URL(c.req.url).hostname });
-  return c.json<CheckBatchResponse>({
-    scan: toSummary(outcome.scan ?? scan),
-    processed: outcome.processed,
-    remaining: outcome.remaining,
-    ...(outcome.processed === 0 && outcome.remaining > 0 ? { retryAfterMs: IDLE_RETRY_MS } : {}),
-  });
+  if (scan.status === 'completed') return c.json(toSummary(scan));
+  const { scan: updated } = await startChecking(db, c.env.SCAN_QUEUE, scan.id, new URL(c.req.url).hostname);
+  return c.json(toSummary(updated ?? scan));
+});
+
+/** Pauses background checking; Start resumes from where it stopped. */
+scanRoutes.post('/:id/pause', async (c) => {
+  const db = c.get('db');
+  const scan = await getScan(db, c.get('user')!.id, c.req.param('id'));
+  if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was deleted.');
+  return c.json(toSummary((await pauseChecking(db, scan.id)) ?? scan));
 });
 
 scanRoutes.get('/:id', async (c) => {

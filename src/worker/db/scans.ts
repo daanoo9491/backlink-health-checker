@@ -37,6 +37,9 @@ export interface ScanRecord {
   created_at: string | Date;
   started_at: string | Date | null;
   completed_at: string | Date | null;
+  heartbeat_at: string | Date | null;
+  chain_id?: string | null;
+  app_host?: string | null;
 }
 
 export function toSummary(r: ScanRecord): ScanSummary {
@@ -62,6 +65,7 @@ export function toSummary(r: ScanRecord): ScanSummary {
     createdAt: iso(r.created_at)!,
     startedAt: iso(r.started_at),
     completedAt: iso(r.completed_at),
+    heartbeatAt: iso(r.heartbeat_at),
   };
 }
 
@@ -97,6 +101,7 @@ interface RowRecord {
   anchor_text: string | null;
   status: string | null;
   check_reason: string | null;
+  retry_at: string | number | null;
   http_status: number | null;
   final_url: string | null;
   response_time_ms: number | null;
@@ -109,7 +114,7 @@ const GROUP_SQL: Record<Exclude<RowFilterGroup, 'all'>, string> = {
   dead: `u.status IN ('DEAD', 'SOFT_404')`,
   redirected: `u.status = 'REDIRECTED'`,
   review: `u.status IN ('BLOCKED', 'RATE_LIMITED', 'SERVER_ERROR', 'TIMEOUT', 'NETWORK_ERROR')`,
-  waiting: `u.status IN ('PENDING', 'CHECKING')`,
+  waiting: `(u.status IN ('PENDING', 'CHECKING') OR u.retry_at IS NOT NULL)`,
   skipped: `r.url_index IS NULL`,
 };
 
@@ -161,7 +166,7 @@ export async function listRows(
     db.query<{ n: number }>(`SELECT COUNT(*)::int AS n ${FROM} WHERE ${where}`, base.params),
     db.query<RowRecord>(
       `SELECT r.sheet_name, r.row_number, r.original_value, u.url, r.is_duplicate, r.invalid_reason,
-              r.target_url, r.anchor_text, u.status, u.check_reason, u.http_status, u.final_url,
+              r.target_url, r.anchor_text, u.status, u.check_reason, u.retry_at, u.http_status, u.final_url,
               u.response_time_ms, u.checked_at
        ${FROM} WHERE ${where}
        ORDER BY r.seq
@@ -206,6 +211,7 @@ export async function listRows(
       anchorText: r.anchor_text,
       status: r.status,
       checkReason: r.check_reason,
+      retryAt: r.retry_at === null ? null : new Date(Number(r.retry_at) * 1000).toISOString(),
       httpStatus: r.http_status,
       finalUrl: r.final_url,
       responseTimeMs: r.response_time_ms,

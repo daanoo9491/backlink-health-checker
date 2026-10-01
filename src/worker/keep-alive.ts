@@ -2,8 +2,8 @@ import type { Db } from './db/db';
 import { WINDOW_SECONDS } from './db/login-throttle';
 
 /**
- * Runs once a day (Cron Trigger). Supabase pauses free projects after about
- * a week without activity; a small write each day keeps it awake even when
+ * Runs with the 10-minute Cron Trigger. Supabase pauses free projects after
+ * about a week without activity; this small write keeps it awake even when
  * nobody uses the app. Also clears sign-in counters that have expired.
  */
 export async function keepAlive(db: Db): Promise<void> {

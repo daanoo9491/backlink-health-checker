@@ -25,6 +25,18 @@ export interface CheckResult {
   responseTimeMs: number | null;
   reason: string;
   error: string | null;
+  /** True when the failure may be temporary, so the check is worth repeating later. */
+  retryable: boolean;
+  /** Seconds the site asked us to wait (Retry-After on a 429/503), if any. */
+  retryAfterSec?: number;
+}
+
+/** Reads a Retry-After header: seconds, or an HTTP date. */
+export function parseRetryAfter(value: string | null, now = Date.now()): number | undefined {
+  if (!value) return undefined;
+  if (/^\d+$/.test(value.trim())) return Number(value.trim());
+  const t = Date.parse(value);
+  return Number.isNaN(t) ? undefined : Math.max(0, Math.round((t - now) / 1000));
 }
 
 export interface CheckDeps {
@@ -45,6 +57,7 @@ const fail = (status: LinkStatus, reason: string, extra: Partial<CheckResult> = 
   responseTimeMs: null,
   reason,
   error: reason,
+  retryable: false,
   ...extra,
 });
 
@@ -65,7 +78,7 @@ async function guard(url: URL, deps: CheckDeps): Promise<CheckResult | null> {
   if (dns.reason === 'INTERNAL') {
     return fail('NETWORK_ERROR', 'Points to an address we don’t check (private, local or not http/https)');
   }
-  return fail('NETWORK_ERROR', 'Couldn’t look up the domain. Try again later');
+  return fail('NETWORK_ERROR', 'Couldn’t look up the domain. Try again later', { retryable: true });
 }
 
 export async function checkLink(originalUrl: string, deps: CheckDeps): Promise<CheckResult> {
@@ -101,16 +114,21 @@ export async function checkLink(originalUrl: string, deps: CheckDeps): Promise<C
       const name = (e as Error)?.name;
       const extra = { finalUrl: current.href, redirected: hop > 0 };
       if (name === 'TimeoutError' || name === 'AbortError') {
-        return fail('TIMEOUT', `No response within ${Math.round(timeoutMs / 1000)} seconds`, extra);
+        return fail('TIMEOUT', `No response within ${Math.round(timeoutMs / 1000)} seconds`, {
+          ...extra,
+          retryable: true,
+        });
       }
       return fail('NETWORK_ERROR', 'Couldn’t connect to the site (connection or security certificate problem)', {
         ...extra,
         error: String((e as Error)?.message ?? e).slice(0, 300),
+        retryable: true,
       });
     }
 
     // We never need the page body in this phase; release the connection.
     const location = res.headers.get('Location');
+    const retryAfter = res.headers.get('Retry-After');
     await res.body?.cancel().catch(() => undefined);
 
     if (res.status >= 300 && res.status < 400 && res.status !== 304) {
@@ -140,6 +158,9 @@ export async function checkLink(originalUrl: string, deps: CheckDeps): Promise<C
       responseTimeMs: Date.now() - started,
       reason,
       error: null,
+      // Rate limits and server errors are often temporary; everything else is a firm answer.
+      retryable: status === 'RATE_LIMITED' || status === 'SERVER_ERROR' || status === 'TIMEOUT',
+      ...(status === 'RATE_LIMITED' || status === 'SERVER_ERROR' ? { retryAfterSec: parseRetryAfter(retryAfter) } : {}),
     };
   }
   return fail('SERVER_ERROR', `More than ${MAX_REDIRECTS} redirects (redirect loop)`, {

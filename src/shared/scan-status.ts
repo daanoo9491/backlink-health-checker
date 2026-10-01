@@ -6,6 +6,7 @@ export const SCAN_STATUS_INFO: Record<ScanStatus, { label: string; tone: 'pendin
   ready: { label: 'Ready to check', tone: 'pending' },
   queued: { label: 'Waiting to start', tone: 'pending' },
   running: { label: 'Checking', tone: 'pending' },
+  paused: { label: 'Paused', tone: 'review' },
   completed: { label: 'Finished', tone: 'active' },
   failed: { label: 'Failed', tone: 'dead' },
 };

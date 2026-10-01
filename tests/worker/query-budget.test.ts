@@ -1,13 +1,13 @@
 /**
- * Keeps database usage in check. Each endpoint the scan page calls while
- * checking has a fixed query budget, so a big workbook or a long check can't
- * quietly multiply database usage (which is what exhausted D1's daily limit).
+ * Keeps database usage in check. Each endpoint the scan page calls, and each
+ * queue message, has a fixed query budget, so a big workbook or a long check
+ * can't quietly multiply database usage (which is what exhausted D1's daily limit).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CheckBatchResponse } from '../../src/shared/api';
+import type { ScanSummary } from '../../src/shared/api';
 import type { Env } from '../../src/worker/env';
 import { fakeInternet } from './fake-net';
-import { queryCounter, signedIn, sql, testEnv } from './helpers';
+import { drain, queryCounter, queueOf, signedIn, sql, testEnv } from './helpers';
 
 let env: Env;
 let api: Awaited<ReturnType<typeof signedIn>>;
@@ -42,33 +42,39 @@ beforeEach(async () => {
   await api(`/api/scans/${id}/complete`, { method: 'POST' });
 });
 
-describe('database queries per request', () => {
-  it('a checking batch: at most 5 queries (read scan, reserve, save, recount+return)', async () => {
+describe('database queries', () => {
+  it('Start: at most 3 queries (session scan lookup + one update)', async () => {
     queryCounter.reset();
-    const r = (await (await api(`/api/scans/${id}/check`, { method: 'POST' })).json()) as CheckBatchResponse;
-    expect(r.processed).toBeGreaterThan(0);
+    const r = (await (await api(`/api/scans/${id}/start`, { method: 'POST' })).json()) as ScanSummary;
+    expect(r.status).toBe('queued');
+    expect(queryCounter.count).toBeLessThanOrEqual(3);
+  });
+
+  it('a checking batch (one queue message): at most 5 queries', async () => {
+    await api(`/api/scans/${id}/start`, { method: 'POST' });
+    queryCounter.reset();
+    const [o] = await drain(env, 1);
+    expect(o).toEqual({ kind: 'next', delaySeconds: 0 });
     expect(queryCounter.count).toBeLessThanOrEqual(5);
   });
 
-  it('an idle batch (everything reserved elsewhere): at most 3 queries, and it says to wait', async () => {
+  it('an idle batch (everything reserved elsewhere): at most 3 queries, and it waits', async () => {
     await sql(`UPDATE unique_urls SET status = 'CHECKING', claimed_at = $2 WHERE scan_id = $1`, [
       id,
       Math.floor(Date.now() / 1000),
     ]);
+    await api(`/api/scans/${id}/start`, { method: 'POST' });
     queryCounter.reset();
-    const r = (await (await api(`/api/scans/${id}/check`, { method: 'POST' })).json()) as CheckBatchResponse;
-    expect(r).toMatchObject({ processed: 0, remaining: 20, retryAfterMs: 5_000 });
+    const [o] = await drain(env, 1);
+    expect(o).toEqual({ kind: 'next', delaySeconds: 60 });
+    expect(queueOf(env).sent[0]?.delaySeconds).toBe(60);
     expect(queryCounter.count).toBeLessThanOrEqual(3);
   });
 
-  it('no wait hint once everything is checked', async () => {
-    let r: CheckBatchResponse | null = null;
-    for (let i = 0; i < 5 && r?.remaining !== 0; i++) {
-      r = (await (await api(`/api/scans/${id}/check`, { method: 'POST' })).json()) as CheckBatchResponse;
-    }
-    expect(r).toMatchObject({ remaining: 0 });
-    expect(r!.retryAfterMs).toBeUndefined();
-    expect(r!.scan.status).toBe('completed');
+  it('a polling request for the scan page: at most 2 queries', async () => {
+    queryCounter.reset();
+    expect((await api(`/api/scans/${id}`)).status).toBe(200);
+    expect(queryCounter.count).toBeLessThanOrEqual(2);
   });
 
   it('a results page with filter counts: at most 5 queries', async () => {
@@ -78,13 +84,12 @@ describe('database queries per request', () => {
     expect(queryCounter.count).toBeLessThanOrEqual(5);
   });
 
-  it('checking a whole scan uses a predictable number of queries', async () => {
+  it('checking a whole scan uses a predictable number of queries and messages', async () => {
+    await api(`/api/scans/${id}/start`, { method: 'POST' });
     queryCounter.reset();
-    let batches = 0;
-    for (let r: CheckBatchResponse | null = null; r?.remaining !== 0 && batches < 10; batches++) {
-      r = (await (await api(`/api/scans/${id}/check`, { method: 'POST' })).json()) as CheckBatchResponse;
-    }
-    expect(batches).toBe(3); // 20 links, 8 per batch
-    expect(queryCounter.count).toBeLessThanOrEqual(batches * 5);
+    const outcomes = await drain(env);
+    expect(outcomes).toHaveLength(3); // 20 links, 8 per batch
+    expect(outcomes.at(-1)).toEqual({ kind: 'done' });
+    expect(queryCounter.count).toBeLessThanOrEqual(outcomes.length * 5);
   });
 });

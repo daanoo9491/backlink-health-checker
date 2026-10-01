@@ -1,8 +1,8 @@
 import type { Db } from './db/db';
+import type { ScanMessage } from './queue';
 
 /**
  * Worker bindings and secrets. Extend as later phases add resources:
- *   Phase 5: SCAN_QUEUE: Queue
  *   Phase 8: EXPORTS: R2Bucket (optional)
  */
 export interface Env {
@@ -11,6 +11,8 @@ export interface Env {
   ASSETS?: Fetcher;
   /** Supabase Postgres, reached through Cloudflare Hyperdrive. */
   HYPERDRIVE: Hyperdrive;
+  /** Background checking: one message = one batch of links (see queue.ts). */
+  SCAN_QUEUE: Queue<ScanMessage>;
 
   // Secrets — set in Cloudflare (Worker → Settings → Variables and Secrets)
   // or locally in .dev.vars. The account row itself lives in the users table.
