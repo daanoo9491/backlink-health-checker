@@ -44,8 +44,10 @@ async function makeScan(urls: string[], extraRows = 0): Promise<string> {
 
 const PUBLIC = ['93.184.216.34'];
 
-const start = async (id: string) => (await (await api(`/api/scans/${id}/start`, { method: 'POST' })).json()) as ScanSummary;
-const pause = async (id: string) => (await (await api(`/api/scans/${id}/pause`, { method: 'POST' })).json()) as ScanSummary;
+const start = async (id: string) =>
+  (await (await api(`/api/scans/${id}/start`, { method: 'POST' })).json()) as ScanSummary;
+const pause = async (id: string) =>
+  (await (await api(`/api/scans/${id}/pause`, { method: 'POST' })).json()) as ScanSummary;
 const detail = async (id: string) => (await (await api(`/api/scans/${id}`)).json()) as ScanDetail;
 
 describe('background checking (POST /api/scans/:id/start + queue)', () => {

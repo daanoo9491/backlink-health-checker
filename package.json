@@ -20,7 +20,7 @@
     "cf-typegen": "wrangler types src/worker/worker-configuration.d.ts",
     "deploy": "npm run build && wrangler deploy",
     "deploy:staging": "cross-env CLOUDFLARE_ENV=staging npm run build && wrangler deploy",
-    "check": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build",
     "secret": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"",
     "db:migrate": "node scripts/migrate.mjs",
     "import:d1": "node scripts/import-from-d1.mjs"
