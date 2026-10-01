@@ -75,7 +75,7 @@ export function RowFilterBar({ filters, facets, onChange }: Props) {
 
       <div className="filter-fields">
         <div className="filter-field filter-search">
-          <label htmlFor={searchId}>Search links</label>
+          <label htmlFor={searchId}>Search links and page titles</label>
           <input
             id={searchId}
             type="search"

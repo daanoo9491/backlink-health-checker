@@ -9,7 +9,9 @@ An internal tool for our Marketing team, with two tools behind one sign-in:
 
 The app runs on Cloudflare; data is stored in Supabase Postgres.
 
-> **Current status: Phase 6 (new name, two-tool layout).** Results can be sorted by row, backlink, status (most urgent first) or HTTP code; the summary cards and an “Issues to look at” list filter the table by issue category, each with advice on what to do.
+> **Current status: Phase 7 (page reader + soft 404).** Pages that answer “200 OK” but are really gone (a “Page not found” title or heading, a not-found message on a short page, or a removed page that now lands on a home page or an error address) are reported as **Soft 404**, with the reason. Bot-check pages count as Blocked. Each backlink page’s title is saved, shown and searchable.
+>
+> **Phase 6 (new name, two-tool layout).** Results can be sorted by row, backlink, status (most urgent first) or HTTP code; the summary cards and an “Issues to look at” list filter the table by issue category, each with advice on what to do.
 >
 > **Phase 5 (background checking).** Upload a workbook or paste links; every unique link is checked once and classified (Active, Dead, Redirected, Blocked, Rate limited, Server error, Timed out, Could not connect), with SSRF protection on every request and redirect. Checking runs in the background on Cloudflare Queues, so you can close the browser; temporary failures are retried automatically, and a scan can be paused and resumed. Data lives in Supabase Postgres, reached through Cloudflare Hyperdrive. See [docs/PHASES.md](docs/PHASES.md).
 

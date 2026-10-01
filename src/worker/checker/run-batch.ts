@@ -82,16 +82,21 @@ export async function runCheckBatch(
 
   // Reserve the next links: waiting ones, retries that are due, and reservations
   // left behind by a batch that was interrupted.
+  // The pick is MATERIALIZED so it runs exactly once: as a plain `IN (subquery)`
+  // Postgres may re-run it, and with SKIP LOCKED each run picks different links,
+  // so one batch could take far more than its size.
   const claimed = await db.query<Claimed>(
-    `UPDATE unique_urls SET status = 'CHECKING', claimed_at = $2, retry_at = NULL
-     WHERE scan_id = $1 AND url_index IN (
+    `WITH picked AS MATERIALIZED (
        SELECT url_index FROM unique_urls
        WHERE scan_id = $1 AND (status = 'PENDING'
                                OR (status = 'CHECKING' AND claimed_at < $3)
                                OR retry_at <= $2)
        ORDER BY url_index LIMIT $4
        FOR UPDATE SKIP LOCKED)
-     RETURNING url_index, url, attempts`,
+     UPDATE unique_urls u SET status = 'CHECKING', claimed_at = $2, retry_at = NULL
+     FROM picked p
+     WHERE u.scan_id = $1 AND u.url_index = p.url_index
+     RETURNING u.url_index, u.url, u.attempts`,
     [scanId, now, now - CLAIM_STALE_SECONDS, opts.batchSize ?? BATCH_SIZE],
   );
 
@@ -163,6 +168,7 @@ export async function runCheckBatch(
       ms: r.responseTimeMs,
       error: r.error,
       reason: r.reason,
+      title: r.pageTitle?.slice(0, 300) ?? null,
       counted: 1,
       retry,
     };
@@ -179,13 +185,14 @@ export async function runCheckBatch(
          response_time_ms = j.ms,
          error_message = j.error,
          check_reason = j.reason,
+         page_title = j.title,
          attempts = u.attempts + j.counted,
          checked_at = CASE WHEN j.counted = 1 THEN $3::timestamptz ELSE u.checked_at END,
          claimed_at = NULL,
          retry_at = j.retry
        FROM jsonb_to_recordset($2::jsonb) AS j(
          i int, status text, http int, final text, redirected boolean, ms int,
-         error text, reason text, counted int, retry bigint)
+         error text, reason text, title text, counted int, retry bigint)
        WHERE u.scan_id = $1 AND u.url_index = j.i`,
       [scanId, JSON.stringify(payload), checkedAt],
     );

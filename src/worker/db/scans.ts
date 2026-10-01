@@ -105,6 +105,7 @@ interface RowRecord {
   anchor_text: string | null;
   status: string | null;
   check_reason: string | null;
+  page_title: string | null;
   retry_at: string | number | null;
   http_status: number | null;
   final_url: string | null;
@@ -172,7 +173,8 @@ function baseWhere(scanId: string, f: RowFilters): { sql: string; params: unknow
     const q = p(f.q.toLowerCase());
     parts.push(
       `(strpos(lower(r.original_value), ${q}) > 0 OR strpos(lower(COALESCE(u.url, '')), ${q}) > 0
-        OR strpos(lower(COALESCE(r.target_url, '')), ${q}) > 0)`,
+        OR strpos(lower(COALESCE(r.target_url, '')), ${q}) > 0
+        OR strpos(lower(COALESCE(u.page_title, '')), ${q}) > 0)`,
     );
   }
   return { sql: parts.join(' AND '), params };
@@ -199,7 +201,7 @@ export async function listRows(
     db.query<{ n: number }>(`SELECT COUNT(*)::int AS n ${FROM} WHERE ${where}`, base.params),
     db.query<RowRecord>(
       `SELECT r.sheet_name, r.row_number, r.original_value, u.url, r.is_duplicate, r.invalid_reason,
-              r.target_url, r.anchor_text, u.status, u.check_reason, u.retry_at, u.http_status, u.final_url,
+              r.target_url, r.anchor_text, u.status, u.check_reason, u.page_title, u.retry_at, u.http_status, u.final_url,
               u.response_time_ms, u.checked_at
        ${FROM} WHERE ${where}
        ORDER BY ${orderBy(filters.sort, filters.dir)}
@@ -262,6 +264,7 @@ export async function listRows(
       anchorText: r.anchor_text,
       status: r.status,
       checkReason: r.check_reason,
+      pageTitle: r.page_title,
       retryAt: r.retry_at === null ? null : new Date(Number(r.retry_at) * 1000).toISOString(),
       httpStatus: r.http_status,
       finalUrl: r.final_url,

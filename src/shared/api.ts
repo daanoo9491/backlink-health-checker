@@ -148,6 +148,8 @@ export interface ScanRowView {
   anchorText: string | null;
   status: string | null;
   checkReason: string | null;
+  /** The backlink page's title, when it loaded as HTML. */
+  pageTitle: string | null;
   /** Set while a temporary failure waits for its automatic retry. */
   retryAt: string | null;
   httpStatus: number | null;

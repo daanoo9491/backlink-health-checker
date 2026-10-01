@@ -8,6 +8,9 @@ import { checkUrl, isInternalHost } from '../../shared/url';
 import { BudgetExhausted, type SubrequestBudget } from './budget';
 import { classifyResponse } from './classify';
 import type { Resolver } from './dns';
+import { extractFacts } from './page-facts';
+import { readPage } from './page-reader';
+import { judgePage } from './soft-404';
 
 export const MAX_REDIRECTS = 5;
 export const TIMEOUT_MS = 15_000;
@@ -29,6 +32,8 @@ export interface CheckResult {
   retryable: boolean;
   /** Seconds the site asked us to wait (Retry-After on a 429/503), if any. */
   retryAfterSec?: number;
+  /** The page's <title>, when it loaded as HTML. */
+  pageTitle: string | null;
 }
 
 /** Reads a Retry-After header: seconds, or an HTTP date. */
@@ -58,6 +63,7 @@ const fail = (status: LinkStatus, reason: string, extra: Partial<CheckResult> = 
   reason,
   error: reason,
   retryable: false,
+  pageTitle: null,
   ...extra,
 });
 
@@ -126,10 +132,14 @@ export async function checkLink(originalUrl: string, deps: CheckDeps): Promise<C
       });
     }
 
-    // We never need the page body in this phase; release the connection.
     const location = res.headers.get('Location');
     const retryAfter = res.headers.get('Retry-After');
-    await res.body?.cancel().catch(() => undefined);
+    const answeredMs = Date.now() - started;
+    const ok = res.status >= 200 && res.status < 300;
+    // A page that loaded is read (size-capped) to spot soft 404s; any other
+    // body is never needed, so the connection is released straight away.
+    const page = ok ? await readPage(res) : null;
+    if (!ok) await res.body?.cancel().catch(() => undefined);
 
     if (res.status >= 300 && res.status < 400 && res.status !== 304) {
       if (!location) {
@@ -149,15 +159,20 @@ export async function checkLink(originalUrl: string, deps: CheckDeps): Promise<C
       continue;
     }
 
-    const { status, reason } = classifyResponse(res.status, startUrl, current.href);
+    const classified = classifyResponse(res.status, startUrl, current.href);
+    const facts = page?.isHtml ? extractFacts(page.html) : null;
+    // "200 OK" isn't the whole story: the page may say it's gone, or be a bot check.
+    const verdict = ok ? judgePage(startUrl, current.href, facts) : null;
+    const { status, reason } = verdict ?? classified;
     return {
       status,
       httpStatus: res.status,
       finalUrl: current.href,
       redirected: current.href !== startUrl,
-      responseTimeMs: Date.now() - started,
+      responseTimeMs: answeredMs,
       reason,
       error: null,
+      pageTitle: facts?.title ?? null,
       // Rate limits and server errors are often temporary; everything else is a firm answer.
       retryable: status === 'RATE_LIMITED' || status === 'SERVER_ERROR' || status === 'TIMEOUT',
       ...(status === 'RATE_LIMITED' || status === 'SERVER_ERROR' ? { retryAfterSec: parseRetryAfter(retryAfter) } : {}),

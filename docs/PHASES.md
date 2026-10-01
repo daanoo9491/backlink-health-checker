@@ -130,3 +130,22 @@ Checking moved from the browser to the server, on Cloudflare Queues. Closing the
 - **No double counting:** a link waiting for its automatic retry counts as Waiting only, not also as Need a look (Phase 5 showed it in both).
 - **No extra database work:** the per-result counts replaced the old “which HTTP codes exist” query (one grouped pass gives both), so the results endpoint is still ≤ 5 queries.
 - **Phone layout fix:** wide tables now scroll inside their box instead of widening the whole page (it happened on Scan history and the scan page).
+
+## Decisions recorded in Phase 7 (page reader + soft 404)
+
+- **One safe page reader** (`src/worker/checker/page-reader.ts`), used by every later check that needs page content. Reads only HTML (`text/html`, `application/xhtml+xml`, or no type if the bytes look like HTML), streams up to **256 KB** and cancels the rest, decodes the page's own charset (header, then `<meta>`; unknown labels fall back to UTF-8), never throws (a dropped connection keeps what arrived), and is covered by the same 15 s timeout as the request. Only pages that answered 2xx are read; error responses are discarded unread as before. Response time is still measured to the first response, not including the body.
+- **Cheap page facts** (`page-facts.ts`): title (from `<head>` only, so SVG titles don't count), first `<h1>`, and visible text from the start of `<body>` (48 KB slice; scripts, styles, templates, comments and SVGs removed). Measured ~2–5 ms for 8 deliberately heavy 256 KB pages, inside the free plan's per-batch CPU allowance for ordinary pages; a test guards it.
+- **Soft-404 rules** (`soft-404.ts`), built so genuine pages are never called gone:
+  - a title counts only if the whole title, or one whole part of it (`Page not found | Site`), is a not-found message, in English, German, French, Spanish, Italian, Dutch, Portuguese or Turkish. “How to fix a 404 page not found error” is genuine.
+  - the first `<h1>` counts the same way (Medium's “404”, Wix's “This page isn’t available”).
+  - a not-found **sentence** (“the page you were looking for … does not exist”) counts only on a short page (≤ 2,500 characters of text). Short phrases like “page not found” or “error 404” in the text never count on their own.
+  - a specific page that now redirects to a home page (`/`, `/index.html`, `/home`, `/en/`…) or an error address (`/404.html`, `/page-not-found`, `?error=404`) is a soft 404. Home pages and language homes redirecting are not. _Change:_ these used to show as Redirected.
+- **Bot checks** served with 200 (“Just a moment…”, “Attention Required! | Cloudflare”, “Access denied”, “Enable JavaScript and cookies to continue”) are **Blocked**, never gone.
+- **Test set:** 15 genuine pages (articles about 404 errors, 404 in a news headline, short contact/help/thank-you pages, a JavaScript app shell whose code contains “Page not found”, hidden templates and comments, SVG titles, search results) and 15 error-page styles (WordPress, Shopify, Squarespace, Ghost, nginx, Medium, Wix, Blogger, Apache, German, French, Spanish). No genuine page is flagged.
+- **Page titles** are saved (`unique_urls.page_title`, migration `003_page_title.sql`), shown under each backlink and included in the search.
+- **Bug fixed:** the query that reserves a batch of links used `IN (subquery … LIMIT 8 FOR UPDATE SKIP LOCKED)`. Postgres may run such a subquery more than once, and with SKIP LOCKED each run picks different links, so one batch could take far more than 8 (seen in tests: 13). It now picks once (`WITH … AS MATERIALIZED`), with a test that a batch never takes more than 8.
+
+## Known limits after Phase 7
+
+- Pages built entirely by JavaScript show their real content only in a browser, so a JavaScript-only “not found” screen isn't seen (they stay Active).
+- A short link (e.g. bit.ly) that points to a home page would be reported as a soft 404; backlink sheets list article pages, so this should be rare.

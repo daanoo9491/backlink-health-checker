@@ -96,6 +96,40 @@ describe('background checking (POST /api/scans/:id/start + queue)', () => {
     });
   });
 
+  it('one batch never takes more than 8 links', async () => {
+    const urls = Array.from({ length: 60 }, (_, i) => `https://m${i}.example.com/`);
+    const net = fakeInternet(Object.fromEntries(urls.map((u) => [new URL(u).hostname, PUBLIC])), {});
+    const id = await makeScan(urls);
+    await start(id);
+    await drain(env, 1);
+    expect(net.requested).toHaveLength(8);
+    const [c] = await sql<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM unique_urls WHERE scan_id = $1 AND status <> 'PENDING'`,
+      [id],
+    );
+    expect(c?.n).toBe(8);
+  });
+
+  it('soft 404s count as dead, and page titles are saved and searchable', async () => {
+    fakeInternet(
+      { 'ok.example.com': PUBLIC, 'gone.example.com': PUBLIC },
+      {
+        'https://ok.example.com/post': { status: 200, html: '<title>Ten tax tips for 2026</title><body>x</body>' },
+        'https://gone.example.com/post': { status: 200, html: '<title>Page not found | Gone</title><body></body>' },
+      },
+    );
+    const id = await makeScan(['https://ok.example.com/post', 'https://gone.example.com/post']);
+    await start(id);
+    await drain(env);
+    const scan = await detail(id);
+    expect(scan).toMatchObject({ status: 'completed', activeCount: 1, soft404Count: 1 });
+    const rows = (await (await api(`/api/scans/${id}/rows?q=tax%20tips`)).json()) as ScanRowsResponse;
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0]).toMatchObject({ pageTitle: 'Ten tax tips for 2026', status: 'ACTIVE' });
+    const dead = (await (await api(`/api/scans/${id}/rows?status=dead`)).json()) as ScanRowsResponse;
+    expect(dead.rows[0]).toMatchObject({ status: 'SOFT_404', checkReason: expect.stringMatching(/title says/) });
+  });
+
   it('pressing Start twice starts only one chain', async () => {
     fakeInternet({ 'a.example.com': PUBLIC }, { 'https://a.example.com/': { status: 200 } });
     const id = await makeScan(['https://a.example.com/']);

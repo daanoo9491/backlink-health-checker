@@ -35,7 +35,7 @@ export const STATUS_INFO: Record<LinkStatus, StatusInfo> = {
   SOFT_404: {
     label: 'Soft 404',
     tone: 'dead',
-    description: 'The page loads but says it no longer exists.',
+    description: 'The page loads but says it no longer exists, or sends visitors to a home page instead.',
     retryable: false,
   },
   REDIRECTED: {

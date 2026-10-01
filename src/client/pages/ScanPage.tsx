@@ -599,6 +599,7 @@ function RowView({ r }: { r: ScanRowView }) {
           <span className="cell-value">{r.value}</span>
         )}
         {r.duplicate && <span className="tag">repeat</span>}
+        {r.pageTitle && <span className="page-title-text">{r.pageTitle}</span>}
         {movedTo && (
           <span className="moved-to">
             now at{' '}

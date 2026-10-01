@@ -1460,3 +1460,10 @@ a:hover {
 .ic-note {
   margin-top: 0.75rem;
 }
+.page-title-text {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  line-height: 1.35;
+  margin-top: 0.2rem;
+}

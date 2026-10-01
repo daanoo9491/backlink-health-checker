@@ -24,7 +24,8 @@ export const ISSUE_CATEGORIES: readonly IssueCategory[] = [
     label: 'Page gone',
     statuses: ['DEAD', 'SOFT_404'],
     tone: 'dead',
-    advice: 'The page was removed. Ask the site owner to restore it, or replace the backlink.',
+    advice:
+      'The page was removed, or now shows a “not found” message or your visitors land on a home page. Ask the site owner to restore it, or replace the backlink.',
   },
   {
     key: 'unreachable',
