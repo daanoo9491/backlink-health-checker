@@ -119,3 +119,14 @@ Checking moved from the browser to the server, on Cloudflare Queues. Closing the
 
 - Free Queues plan: about 25,000 links a day across all scans. Messages are kept 24 hours; anything older is picked up by the Cron safety net.
 - A link that keeps failing temporarily is shown with its last error after 3 attempts; "Check again" for single links comes with rechecks (Phase 14).
+
+## Decisions recorded in Phase 6 (new name, two-tool layout)
+
+- **Name: LinkLedger SEO**, tagline “Backlink & index monitor” (recommended in the product plan; it's an internal team tool, so no trademark search was needed). Only the display name changed, kept in one place (`src/shared/brand.ts`, plus `APP_NAME` in `wrangler.jsonc` for `/api/health`). The repo, Worker names, queue names and every web address are unchanged, so old links and bookmarks still open. The checker's User-Agent now says `LinkLedgerSEO/1.0`.
+- **Two tools in the menu:** a **Link Health** section (New scan, Scan history) and an **Index Checker** section. Index Checker is a “coming next” page explaining the two routes (Search Console for your own sites; signals for everyone else's) and the rule that someone else's page is never labelled “Not indexed”. The Dashboard is split the same way.
+- **Sorting:** column headers sort by Row (workbook order, default), Backlink (A–Z), Status (most urgent first: gone → can't be reached → site errors → refused → redirected → active → waiting; skipped rows always last) and HTTP code (no response last). Press again to reverse. Ties keep workbook order. Sort lives in the address (`?sort=status&dir=desc`), so refresh and Back keep it. Only fixed, whitelisted ORDER BY strings reach SQL.
+- **Issue categories** (`src/shared/issues.ts`): every non-active result falls in exactly one: Page gone (404/410, soft 404), Can't be reached (DNS/connection/certificate), Site errors (5xx, timeout), Site refused our check (403, 429), Redirected. Each has one or two sentences of advice. They are filter groups too (`?status=refused` etc.).
+- **Summary cards are buttons** that filter the table; the “Issues to look at” list has a Show rows button per category. Card numbers count unique links and come from the same query as the table, so they always agree with the filters.
+- **No double counting:** a link waiting for its automatic retry counts as Waiting only, not also as Need a look (Phase 5 showed it in both).
+- **No extra database work:** the per-result counts replaced the old “which HTTP codes exist” query (one grouped pass gives both), so the results endpoint is still ≤ 5 queries.
+- **Phone layout fix:** wide tables now scroll inside their box instead of widening the whole page (it happened on Scan history and the scan page).

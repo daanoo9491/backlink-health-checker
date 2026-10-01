@@ -1,6 +1,7 @@
 /**
  * Types shared by the Worker (backend) and the React app (frontend).
  */
+import type { LinkStatus } from './status';
 
 export interface HealthResponse {
   status: 'ok';
@@ -155,9 +156,30 @@ export interface ScanRowView {
   checkedAt: string | null;
 }
 
-/** Status filter groups shown as buttons above the results table. */
-export const ROW_FILTER_GROUPS = ['all', 'active', 'dead', 'redirected', 'review', 'waiting', 'skipped'] as const;
+/**
+ * Status filter groups. The main ones are buttons above the results table;
+ * 'unreachable', 'site_error' and 'refused' split "Need a look" into issue
+ * categories (see shared/issues.ts). A link waiting for an automatic retry
+ * counts as waiting only, never also as an issue.
+ */
+export const ROW_FILTER_GROUPS = [
+  'all',
+  'active',
+  'dead',
+  'redirected',
+  'review',
+  'unreachable',
+  'site_error',
+  'refused',
+  'waiting',
+  'skipped',
+] as const;
 export type RowFilterGroup = (typeof ROW_FILTER_GROUPS)[number];
+
+/** Columns the results table can be sorted by. 'row' = order in the workbook. */
+export const ROW_SORTS = ['row', 'url', 'status', 'http'] as const;
+export type RowSort = (typeof ROW_SORTS)[number];
+export type SortDir = 'asc' | 'desc';
 
 export interface RowFilters {
   group: RowFilterGroup;
@@ -167,6 +189,8 @@ export interface RowFilters {
   http: string;
   /** Text to find in the backlink or target URL. */
   q: string;
+  sort: RowSort;
+  dir: SortDir;
 }
 
 export interface RowFacets {
@@ -174,6 +198,11 @@ export interface RowFacets {
   groups: Record<RowFilterGroup, number>;
   sheets: string[];
   httpCodes: number[];
+  /**
+   * Unique links per result, for the whole scan (filters don't apply).
+   * Links waiting for an automatic retry are counted in `retrying` only.
+   */
+  links: { byStatus: Partial<Record<LinkStatus, number>>; retrying: number };
 }
 
 export interface ScanRowsResponse {

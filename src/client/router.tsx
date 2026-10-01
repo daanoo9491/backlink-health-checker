@@ -6,6 +6,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { NewScanPage } from './pages/NewScanPage';
 import { ScanHistoryPage } from './pages/ScanHistoryPage';
 import { ScanPage } from './pages/ScanPage';
+import { IndexCheckerPage } from './pages/IndexCheckerPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
@@ -21,6 +22,7 @@ export const router = createBrowserRouter([
           { path: 'scans/new', element: <NewScanPage /> },
           { path: 'scans', element: <ScanHistoryPage /> },
           { path: 'scans/:id', element: <ScanPage /> },
+          { path: 'index-checker', element: <IndexCheckerPage /> },
           { path: 'settings', element: <SettingsPage /> },
           { path: '*', element: <NotFoundPage /> },
         ],

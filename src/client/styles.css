@@ -313,6 +313,12 @@ a:hover {
   display: grid;
   gap: 2rem;
 }
+/* Grid children may shrink below their content (wide tables scroll inside .table-wrap
+   instead of widening the whole page on phones). */
+.stack-lg > *,
+.stack > * {
+  min-width: 0;
+}
 .narrow {
   max-width: 760px;
 }
@@ -509,6 +515,7 @@ a:hover {
 /* ---------- Table ---------- */
 .table-wrap {
   overflow-x: auto;
+  position: relative; /* keeps visually hidden cells from widening the page */
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
@@ -695,6 +702,11 @@ a:hover {
   font-size: clamp(2rem, 4vw, 2.75rem);
   line-height: 1.1;
   font-weight: 700;
+  margin-bottom: 0.4rem;
+}
+.login-tagline {
+  color: #9fc3cc;
+  font-weight: 600;
   margin-bottom: 1rem;
 }
 .login-lead {
@@ -1245,4 +1257,206 @@ a:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+/* ---------- Phase 6: brand, two-tool menu ---------- */
+.brand-text {
+  display: grid;
+  gap: 0.1rem;
+}
+.brand-tagline {
+  color: #9fc3cc;
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+.nav {
+  display: grid;
+  gap: 1rem;
+}
+.nav-section {
+  padding: 0 0.75rem 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8fb3bc;
+}
+.nav-soon {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #dbe7ea;
+}
+.nav-link.active .nav-soon {
+  background: var(--harbor-tint);
+  color: var(--harbor);
+}
+.nav-soon-light {
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  background: var(--harbor-tint);
+  color: var(--harbor);
+}
+.tool-heading {
+  font-size: 1.3rem;
+  font-weight: 700;
+  padding-bottom: 0.4rem;
+  border-bottom: 2px solid var(--harbor-tint);
+  margin-bottom: -1rem;
+}
+.stack {
+  display: grid;
+  gap: 1.5rem;
+}
+.tool-intro {
+  max-width: 760px;
+}
+.eyebrow {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--harbor);
+}
+.plain-list {
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+/* ---------- Phase 6: clickable summary cards ---------- */
+.stat-cards {
+  list-style: none;
+  padding: 0;
+  overflow: hidden;
+}
+.stat-cards .stat {
+  padding: 0;
+}
+.stat-button {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  padding: 1.1rem 1.25rem;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.stat-button:hover {
+  background: #f8faf9;
+}
+.stat.is-selected .stat-button {
+  background: var(--harbor-tint);
+  box-shadow: inset 0 -4px 0 var(--harbor);
+}
+.stat-label {
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
+.stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.stat-active .stat-value {
+  color: var(--active);
+}
+.stat-dead .stat-value {
+  color: var(--dead);
+}
+.stat-review .stat-value {
+  color: var(--review);
+}
+.stat-redirected .stat-value {
+  color: var(--redirected);
+}
+
+/* ---------- Phase 6: issue categories ---------- */
+.issues {
+  justify-items: stretch;
+}
+.issue-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+}
+.issue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 0 0.9rem 1rem;
+  border-top: 1px solid var(--line);
+  border-left: 4px solid var(--pending);
+}
+.issue:first-child {
+  border-top: 0;
+}
+.issue-dead {
+  border-left-color: var(--dead);
+}
+.issue-review {
+  border-left-color: var(--review);
+}
+.issue-redirected {
+  border-left-color: var(--redirected);
+}
+.issue-title {
+  font-weight: 700;
+}
+.issue-count {
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.issue-advice {
+  color: var(--ink-soft);
+  max-width: 46rem;
+}
+.issue .button {
+  flex: none;
+}
+
+/* ---------- Phase 6: sortable columns ---------- */
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.sort-button:hover,
+.sort-button.is-sorted {
+  color: var(--ink);
+}
+.sort-arrow {
+  font-size: 0.7rem;
+  opacity: 0.6;
+}
+.sort-button.is-sorted .sort-arrow {
+  opacity: 1;
+  color: var(--harbor);
+}
+.table th.num .sort-button {
+  flex-direction: row-reverse;
+}
+@media (max-width: 560px) {
+  .issue {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+.ic-note {
+  margin-top: 0.75rem;
 }

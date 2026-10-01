@@ -1,19 +1,39 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
+import { BRAND, TOOLS } from '../../shared/brand';
 import { useAuth } from '../auth/auth-context';
 import { Icon, type IconName } from './Icon';
 
-const NAV: { to: string; label: string; icon: IconName; end?: boolean }[] = [
-  { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
-  { to: '/scans/new', label: 'New scan', icon: 'upload' },
-  { to: '/scans', label: 'Scan history', icon: 'history', end: true },
-  { to: '/settings', label: 'Settings', icon: 'settings' },
+interface NavItem {
+  to: string;
+  label: string;
+  icon: IconName;
+  end?: boolean;
+  soon?: boolean;
+}
+
+/** The menu: shared pages, then one section per tool. */
+const NAV: { section?: string; items: NavItem[] }[] = [
+  { items: [{ to: '/', label: 'Dashboard', icon: 'dashboard', end: true }] },
+  {
+    section: TOOLS.linkHealth,
+    items: [
+      { to: '/scans/new', label: 'New scan', icon: 'upload' },
+      { to: '/scans', label: 'Scan history', icon: 'history', end: true },
+    ],
+  },
+  {
+    section: TOOLS.indexChecker,
+    items: [{ to: '/index-checker', label: 'Check URLs', icon: 'search', soon: true }],
+  },
+  { items: [{ to: '/settings', label: 'Settings', icon: 'settings' }] },
 ];
 
 const TITLES: Record<string, string> = {
   '/': 'Dashboard',
   '/scans/new': 'New scan',
   '/scans': 'Scan history',
+  '/index-checker': TOOLS.indexChecker,
   '/settings': 'Settings',
 };
 
@@ -26,7 +46,7 @@ export function AppLayout() {
   const title = TITLES[pathname] ?? (/^\/scans\/[^/]+$/.test(pathname) ? 'Scan' : 'Page not found');
 
   useEffect(() => {
-    document.title = `${title} · Backlink Health Checker`;
+    document.title = `${title} · ${BRAND.name}`;
   }, [title]);
 
   async function handleSignOut() {
@@ -45,19 +65,32 @@ export function AppLayout() {
           <span className="brand-mark">
             <Icon name="link" size={20} />
           </span>
-          <span className="brand-name">Backlink Health Checker</span>
+          <span className="brand-text">
+            <span className="brand-name">{BRAND.name}</span>
+            <span className="brand-tagline">{BRAND.tagline}</span>
+          </span>
         </div>
-        <nav aria-label="Main navigation">
-          <ul className="nav-list">
-            {NAV.map((item) => (
-              <li key={item.to}>
-                <NavLink to={item.to} end={item.end} className="nav-link">
-                  <Icon name={item.icon} />
-                  {item.label}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
+        <nav aria-label="Main navigation" className="nav">
+          {NAV.map((group, i) => (
+            <div key={group.section ?? i} className="nav-group">
+              {group.section && (
+                <p className="nav-section" id={`nav-${i}`}>
+                  {group.section}
+                </p>
+              )}
+              <ul className="nav-list" aria-labelledby={group.section ? `nav-${i}` : undefined}>
+                {group.items.map((item) => (
+                  <li key={item.to}>
+                    <NavLink to={item.to} end={item.end} className="nav-link">
+                      <Icon name={item.icon} />
+                      {item.label}
+                      {item.soon && <span className="nav-soon">Soon</span>}
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </nav>
         <button type="button" className="nav-link nav-signout" onClick={handleSignOut}>
           <Icon name="logout" />

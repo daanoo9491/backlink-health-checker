@@ -2,12 +2,16 @@ import type {
   RowFacets,
   RowFilterGroup,
   RowFilters,
+  RowSort,
   ScanDetail,
   ScanRowView,
   ScanStatus,
   ScanSummary,
   SheetInfo,
+  SortDir,
 } from '../../shared/api';
+import { ISSUE_CATEGORIES, REVIEW_STATUSES, STATUS_SORT_ORDER } from '../../shared/issues';
+import { LINK_STATUSES, type LinkStatus } from '../../shared/status';
 import { iso, num, type Db } from './db';
 
 export interface ScanRecord {
@@ -108,15 +112,44 @@ interface RowRecord {
   checked_at: string | Date | null;
 }
 
-/** SQL condition for each status group (rows joined to their unique URL as "u"). */
+/** Status names come from our own constant lists, never from user input. */
+const inList = (statuses: readonly LinkStatus[]) => statuses.map((x) => `'${x}'`).join(', ');
+const category = (key: string) => ISSUE_CATEGORIES.find((c) => c.key === key)!.statuses;
+
+/**
+ * SQL condition for each status group (rows joined to their unique URL as "u").
+ * A link waiting for an automatic retry is only in "waiting", so the groups
+ * don't overlap and add up.
+ */
 const GROUP_SQL: Record<Exclude<RowFilterGroup, 'all'>, string> = {
   active: `u.status = 'ACTIVE'`,
-  dead: `u.status IN ('DEAD', 'SOFT_404')`,
+  dead: `u.status IN (${inList(category('dead'))})`,
   redirected: `u.status = 'REDIRECTED'`,
-  review: `u.status IN ('BLOCKED', 'RATE_LIMITED', 'SERVER_ERROR', 'TIMEOUT', 'NETWORK_ERROR')`,
+  review: `u.status IN (${inList(REVIEW_STATUSES)}) AND u.retry_at IS NULL`,
+  unreachable: `u.status IN (${inList(category('unreachable'))}) AND u.retry_at IS NULL`,
+  site_error: `u.status IN (${inList(category('site_error'))}) AND u.retry_at IS NULL`,
+  refused: `u.status IN (${inList(category('refused'))}) AND u.retry_at IS NULL`,
   waiting: `(u.status IN ('PENDING', 'CHECKING') OR u.retry_at IS NOT NULL)`,
   skipped: `r.url_index IS NULL`,
 };
+
+/** Most urgent first; skipped rows (no link) last. */
+const STATUS_RANK = `CASE u.status ${STATUS_SORT_ORDER.map((st, i) => `WHEN '${st}' THEN ${i}`).join(' ')} ELSE ${STATUS_SORT_ORDER.length} END`;
+
+/** ORDER BY for each sort; ties keep workbook order. Only these fixed strings reach SQL. */
+function orderBy(sort: RowSort, dir: SortDir): string {
+  const d = dir === 'desc' ? 'DESC' : 'ASC';
+  switch (sort) {
+    case 'url':
+      return `lower(COALESCE(u.url, r.original_value)) ${d}, r.seq`;
+    case 'status': // skipped rows (no link) stay at the end either way
+      return `(u.status IS NULL), ${STATUS_RANK} ${d}, r.seq`;
+    case 'http':
+      return `u.http_status ${d} NULLS LAST, r.seq`;
+    default:
+      return `r.seq ${d}`;
+  }
+}
 
 const FROM = `FROM scan_rows r LEFT JOIN unique_urls u ON u.scan_id = r.scan_id AND u.url_index = r.url_index`;
 
@@ -162,14 +195,14 @@ export async function listRows(
     .join(', ');
 
   // Independent reads: run them together over the same connection.
-  const [count, rows, facets, codes] = await Promise.all([
+  const [count, rows, facets, links] = await Promise.all([
     db.query<{ n: number }>(`SELECT COUNT(*)::int AS n ${FROM} WHERE ${where}`, base.params),
     db.query<RowRecord>(
       `SELECT r.sheet_name, r.row_number, r.original_value, u.url, r.is_duplicate, r.invalid_reason,
               r.target_url, r.anchor_text, u.status, u.check_reason, u.retry_at, u.http_status, u.final_url,
               u.response_time_ms, u.checked_at
        ${FROM} WHERE ${where}
-       ORDER BY r.seq
+       ORDER BY ${orderBy(filters.sort, filters.dir)}
        LIMIT $${n + 1} OFFSET $${n + 2}`,
       [...base.params, pageSize, (page - 1) * pageSize],
     ),
@@ -177,12 +210,26 @@ export async function listRows(
       `SELECT COUNT(*)::int AS all_rows, ${groupCounts} ${FROM} WHERE ${base.sql}`,
       base.params,
     ),
-    db.query<{ code: number }>(
-      `SELECT DISTINCT http_status AS code FROM unique_urls
-       WHERE scan_id = $1 AND http_status IS NOT NULL ORDER BY http_status`,
+    // One pass over the scan's links gives both the HTTP codes and the per-result counts.
+    db.query<{ status: string; retrying: boolean; code: number | null; n: number }>(
+      `SELECT status, (retry_at IS NOT NULL) AS retrying, http_status AS code, COUNT(*)::int AS n
+       FROM unique_urls WHERE scan_id = $1
+       GROUP BY 1, 2, 3`,
       [scanId],
     ),
   ]);
+
+  const byStatus: Partial<Record<LinkStatus, number>> = {};
+  let retrying = 0;
+  const codes = new Set<number>();
+  for (const l of links) {
+    if (l.code !== null) codes.add(num(l.code));
+    if (l.retrying) retrying += num(l.n);
+    else if ((LINK_STATUSES as readonly string[]).includes(l.status)) {
+      const st = l.status as LinkStatus;
+      byStatus[st] = (byStatus[st] ?? 0) + num(l.n);
+    }
+  }
 
   const f = facets[0] ?? {};
   return {
@@ -194,11 +241,15 @@ export async function listRows(
         dead: num(f.dead),
         redirected: num(f.redirected),
         review: num(f.review),
+        unreachable: num(f.unreachable),
+        site_error: num(f.site_error),
+        refused: num(f.refused),
         waiting: num(f.waiting),
         skipped: num(f.skipped),
       },
-      httpCodes: codes.map((r) => r.code),
+      httpCodes: [...codes].sort((a, b) => a - b),
       sheets: sheetNames,
+      links: { byStatus, retrying },
     },
     rows: rows.map((r) => ({
       sheet: r.sheet_name,

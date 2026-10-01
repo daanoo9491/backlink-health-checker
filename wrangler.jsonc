@@ -14,7 +14,7 @@
   },
   "vars": {
     "APP_ENV": "production",
-    "APP_NAME": "Backlink Health Checker",
+    "APP_NAME": "LinkLedger SEO",
   },
 
   // Database: Supabase Postgres, reached through Cloudflare Hyperdrive
@@ -67,7 +67,7 @@
       "triggers": { "crons": ["*/10 * * * *"] },
       "vars": {
         "APP_ENV": "staging",
-        "APP_NAME": "Backlink Health Checker (Staging)",
+        "APP_NAME": "LinkLedger SEO (Staging)",
       },
     },
   },

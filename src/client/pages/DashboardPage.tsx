@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import type { DashboardSummary } from '../../shared/api';
+import { TOOLS } from '../../shared/brand';
 import { api, RequestError } from '../api/client';
 import { useAuth } from '../auth/auth-context';
 import { FileDrop } from '../components/FileDrop';
@@ -39,6 +40,7 @@ export function DashboardPage() {
     <div className="stack-lg">
       <p className="greeting">Hello {user ? firstName(user.email) : 'there'}. Ready to check your backlinks?</p>
 
+      <h2 className="tool-heading">{TOOLS.linkHealth}</h2>
       <FileDrop
         variant="banner"
         onFile={(f) => {
@@ -62,9 +64,9 @@ export function DashboardPage() {
 
       {data && (
         <section aria-labelledby="totals-heading">
-          <h2 id="totals-heading" className="section-title">
+          <h3 id="totals-heading" className="section-title">
             Your totals
-          </h2>
+          </h3>
           <dl className="stat-strip">
             {stats.map((s) => (
               <div key={s.label} className={`stat${s.tone ? ` stat-${s.tone}` : ''}`}>
@@ -79,9 +81,9 @@ export function DashboardPage() {
       {data && (
         <section aria-labelledby="recent-heading">
           <div className="section-head">
-            <h2 id="recent-heading" className="section-title">
+            <h3 id="recent-heading" className="section-title">
               Recent scans
-            </h2>
+            </h3>
             {data.recentScans.length > 0 && <Link to="/scans">See all scans</Link>}
           </div>
           {data.recentScans.length === 0 ? (
@@ -108,6 +110,19 @@ export function DashboardPage() {
           )}
         </section>
       )}
+
+      <section aria-labelledby="ic-card" className="stack">
+        <h2 id="ic-card" className="tool-heading">
+          {TOOLS.indexChecker} <span className="nav-soon nav-soon-light">Soon</span>
+        </h2>
+        <div className="panel tool-card">
+          <p>
+            See whether each page is in Google, or able to be: Google’s own answer for your sites in Search Console, and
+            honest indexability signals for everyone else’s.
+          </p>
+          <Link to="/index-checker">What’s coming</Link>
+        </div>
+      </section>
     </div>
   );
 }

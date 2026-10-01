@@ -15,7 +15,7 @@ export const TIMEOUT_MS = 15_000;
 // Honest identification, with a browser-like prefix because many sites
 // reject requests that don't look like a browser at all.
 export const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 BacklinkHealthChecker/1.0';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 LinkLedgerSEO/1.0';
 
 export interface CheckResult {
   status: LinkStatus;

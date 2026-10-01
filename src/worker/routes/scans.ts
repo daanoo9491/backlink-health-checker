@@ -1,18 +1,20 @@
 /**
  * Saving a scan happens in steps so every request stays small (free-plan CPU
- * and D1 query limits):
+ * and request limits):
  *   POST /scans              describe the scan          -> { id }   (status: uploading)
  *   POST /scans/:id/urls     unique URLs, in chunks     (safe to retry)
  *   POST /scans/:id/rows     source rows, in chunks     (safe to retry)
  *   POST /scans/:id/complete verify everything arrived  -> status: ready
  * Each chunk is written with ONE statement: the rows travel as a single JSON
- * value and SQLite unpacks them with json_each().
+ * value and Postgres unpacks it (jsonb_to_recordset).
  */
 import { Hono } from 'hono';
 import {
   ROW_FILTER_GROUPS,
+  ROW_SORTS,
   type CreateScanResponse,
   type RowFilterGroup,
+  type RowSort,
   type RowFilters,
   type ScanListResponse,
   type ScanRowsResponse,
@@ -204,11 +206,14 @@ function readFilters(q: Record<string, string>): RowFilters {
     ? (q.status as RowFilterGroup)
     : 'all';
   const http = q.http === 'none' || /^[1-5]\d\d$/.test(q.http ?? '') ? q.http! : '';
+  const sort = (ROW_SORTS as readonly string[]).includes(q.sort ?? '') ? (q.sort as RowSort) : 'row';
   return {
     group,
     sheet: (q.sheet ?? '').slice(0, 100),
     http,
     q: (q.q ?? '').trim().slice(0, 200),
+    sort,
+    dir: q.dir === 'desc' ? 'desc' : 'asc',
   };
 }
 

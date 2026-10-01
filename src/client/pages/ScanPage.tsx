@@ -2,13 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   ROW_FILTER_GROUPS,
+  ROW_SORTS,
   type RowFilterGroup,
   type RowFilters,
+  type RowSort,
   type ScanDetail,
   type ScanRowsResponse,
   type ScanRowView,
   type ScanSummary,
 } from '../../shared/api';
+import { ISSUE_CATEGORIES, REVIEW_STATUSES } from '../../shared/issues';
 import { STATUS_INFO, type LinkStatus } from '../../shared/status';
 import { INVALID_REASON_TEXT, type InvalidReason } from '../../shared/url';
 import { api, RequestError } from '../api/client';
@@ -43,11 +46,14 @@ export function ScanPage() {
   // Filters and page live in the address, so refresh/back keep them.
   const page = Math.max(1, Number(params.get('page')) || 1);
   const statusParam = params.get('status') ?? 'all';
+  const sortParam = params.get('sort') ?? 'row';
   const filters: RowFilters = {
     group: (ROW_FILTER_GROUPS as readonly string[]).includes(statusParam) ? (statusParam as RowFilterGroup) : 'all',
     sheet: params.get('sheet') ?? '',
     http: params.get('http') ?? '',
     q: params.get('q') ?? '',
+    sort: (ROW_SORTS as readonly string[]).includes(sortParam) ? (sortParam as RowSort) : 'row',
+    dir: params.get('dir') === 'desc' ? 'desc' : 'asc',
   };
   const query = new URLSearchParams({
     page: String(page),
@@ -56,6 +62,8 @@ export function ScanPage() {
     ...(filters.sheet ? { sheet: filters.sheet } : {}),
     ...(filters.http ? { http: filters.http } : {}),
     ...(filters.q ? { q: filters.q } : {}),
+    ...(filters.sort !== 'row' ? { sort: filters.sort } : {}),
+    ...(filters.dir !== 'asc' ? { dir: filters.dir } : {}),
   }).toString();
 
   const updateFilters = useCallback(
@@ -63,9 +71,19 @@ export function ScanPage() {
       setParams(
         (prev) => {
           const p = new URLSearchParams(prev);
-          const map: Record<keyof RowFilters, string> = { group: 'status', sheet: 'sheet', http: 'http', q: 'q' };
+          const map: Record<keyof RowFilters, string> = {
+            group: 'status',
+            sheet: 'sheet',
+            http: 'http',
+            q: 'q',
+            sort: 'sort',
+            dir: 'dir',
+          };
+          // Defaults stay out of the address.
+          const isDefault = (k: keyof RowFilters, v: string) =>
+            !v || (k === 'group' && v === 'all') || (k === 'sort' && v === 'row') || (k === 'dir' && v === 'asc');
           for (const [k, v] of Object.entries(next) as [keyof RowFilters, string][]) {
-            if (!v || v === 'all') p.delete(map[k]);
+            if (isDefault(k, v)) p.delete(map[k]);
             else p.set(map[k], v);
           }
           p.delete('page'); // new filters start on page 1
@@ -195,14 +213,45 @@ export function ScanPage() {
     );
 
   const started = scan.checkedCount > 0 || scan.status === 'running' || scan.status === 'completed';
+  // Unique-link counts per result, from the latest table load (a link waiting for
+  // its automatic retry counts as Waiting only). Before that loads: the scan's totals.
+  const links = rows?.facets.links;
+  const count = (sts: readonly LinkStatus[]) => sts.reduce((n, st) => n + (links?.byStatus[st] ?? 0), 0);
+  const cards: { label: string; value: number; tone?: string; group: RowFilterGroup }[] = [
+    { label: 'Active', value: links ? count(['ACTIVE']) : scan.activeCount, tone: 'active', group: 'active' },
+    {
+      label: 'Dead',
+      value: links ? count(['DEAD', 'SOFT_404']) : scan.deadCount + scan.soft404Count,
+      tone: 'dead',
+      group: 'dead',
+    },
+    {
+      label: 'Redirected',
+      value: links ? count(['REDIRECTED']) : scan.redirectedCount,
+      tone: 'redirected',
+      group: 'redirected',
+    },
+    {
+      label: 'Need a look',
+      value: links ? count(REVIEW_STATUSES) : scan.blockedCount + scan.errorCount,
+      tone: 'review',
+      group: 'review',
+    },
+    {
+      label: 'Waiting',
+      value: links ? count(['PENDING', 'CHECKING']) + links.retrying : scan.uniqueUrls - scan.checkedCount,
+      group: 'waiting',
+    },
+  ];
+  const issues = links ? ISSUE_CATEGORIES.map((c) => ({ ...c, n: count(c.statuses) })).filter((c) => c.n > 0) : [];
+  const showRows = (group: RowFilterGroup) => {
+    updateFilters({ group });
+    document.getElementById('rows-heading')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const sortBy = (sort: RowSort) =>
+    updateFilters(filters.sort === sort ? { dir: filters.dir === 'asc' ? 'desc' : 'asc' } : { sort, dir: 'asc' });
   const stats = started
-    ? [
-        { label: 'Active', value: scan.activeCount, tone: 'active' },
-        { label: 'Dead', value: scan.deadCount + scan.soft404Count, tone: 'dead' },
-        { label: 'Redirected', value: scan.redirectedCount },
-        { label: 'Need a look', value: scan.blockedCount + scan.errorCount, tone: 'review' },
-        { label: 'Waiting', value: scan.uniqueUrls - scan.checkedCount },
-      ]
+    ? []
     : [
         { label: 'Rows', value: scan.totalRows },
         { label: 'Unique links', value: scan.uniqueUrls },
@@ -322,20 +371,74 @@ export function ScanPage() {
       )}
 
       <div className="stat-block">
-        <dl className="stat-strip">
-          {stats.map((s) => (
-            <div key={s.label} className={`stat${s.tone ? ` stat-${s.tone}` : ''}`}>
-              <dt>{s.label}</dt>
-              <dd>{formatNumber(s.value)}</dd>
-            </div>
-          ))}
-        </dl>
+        {started ? (
+          <ul className="stat-strip stat-cards" aria-label="Results by unique link. Choose one to show those rows.">
+            {cards.map((c) => {
+              const selected = filters.group === c.group;
+              return (
+                <li key={c.label} className={`stat${c.tone ? ` stat-${c.tone}` : ''}${selected ? ' is-selected' : ''}`}>
+                  <button
+                    type="button"
+                    className="stat-button"
+                    aria-pressed={selected}
+                    onClick={() => (selected ? updateFilters({ group: 'all' }) : showRows(c.group))}
+                  >
+                    <span className="stat-label">{c.label}</span>
+                    <span className="stat-value">{formatNumber(c.value)}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <dl className="stat-strip">
+            {stats.map((s) => (
+              <div key={s.label} className={`stat${s.tone ? ` stat-${s.tone}` : ''}`}>
+                <dt>{s.label}</dt>
+                <dd>{formatNumber(s.value)}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
         {started && (
           <p className="form-hint">
-            These count unique links. The filters below count rows, so a link used on two rows counts twice there.
+            These count unique links; choose one to see its rows. The filters below count rows, so a link used on two
+            rows counts twice there.
           </p>
         )}
       </div>
+
+      {issues.length > 0 && (
+        <section className="panel issues" aria-labelledby="issues-heading">
+          <h2 id="issues-heading" className="section-title">
+            Issues to look at
+          </h2>
+          <ul className="issue-list">
+            {issues.map((c) => (
+              <li key={c.key} className={`issue issue-${c.tone}`}>
+                <div>
+                  <p className="issue-title">
+                    {c.label}{' '}
+                    <span className="issue-count">
+                      {formatNumber(c.n)} {c.n === 1 ? 'link' : 'links'}
+                    </span>
+                  </p>
+                  <p className="issue-advice">{c.advice}</p>
+                </div>
+                <button type="button" className="button button-secondary button-small" onClick={() => showRows(c.key)}>
+                  Show rows
+                </button>
+              </li>
+            ))}
+          </ul>
+          {links && links.retrying > 0 && (
+            <p className="form-hint">
+              {formatNumber(links.retrying)} more {links.retrying === 1 ? 'link is' : 'links are'} waiting for an
+              automatic retry.
+            </p>
+          )}
+        </section>
+      )}
 
       <section aria-labelledby="rows-heading">
         <div className="section-head">
@@ -346,6 +449,7 @@ export function ScanPage() {
             <p className="form-hint" aria-live="polite">
               Rows {formatNumber(from)}–{formatNumber(to)} of {formatNumber(rows.total)}
               {rows.total !== rows.facets.groups.all || filters.group !== 'all' ? ' matching your filters' : ''}
+              {filters.sort === 'status' && (filters.dir === 'asc' ? ' · most urgent first' : ' · most urgent last')}
             </p>
           )}
         </div>
@@ -355,14 +459,10 @@ export function ScanPage() {
             <thead>
               <tr>
                 <th scope="col">Sheet</th>
-                <th scope="col" className="num">
-                  Row
-                </th>
-                <th scope="col">Backlink</th>
-                <th scope="col">Status</th>
-                <th scope="col" className="num">
-                  HTTP
-                </th>
+                <SortHeader label="Row" sort="row" filters={filters} onSort={sortBy} className="num" />
+                <SortHeader label="Backlink" sort="url" filters={filters} onSort={sortBy} />
+                <SortHeader label="Status" sort="status" filters={filters} onSort={sortBy} />
+                <SortHeader label="HTTP" sort="http" filters={filters} onSort={sortBy} className="num" />
                 <th scope="col">Target URL</th>
               </tr>
             </thead>
@@ -448,6 +548,37 @@ export function ScanPage() {
         </p>
       </ConfirmDialog>
     </div>
+  );
+}
+
+/** A column header that sorts the table; pressing it again reverses the order. */
+function SortHeader({
+  label,
+  sort,
+  filters,
+  onSort,
+  className,
+}: {
+  label: string;
+  sort: RowSort;
+  filters: RowFilters;
+  onSort: (sort: RowSort) => void;
+  className?: string;
+}) {
+  const current = filters.sort === sort;
+  return (
+    <th
+      scope="col"
+      className={className}
+      aria-sort={current ? (filters.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+    >
+      <button type="button" className={`sort-button${current ? ' is-sorted' : ''}`} onClick={() => onSort(sort)}>
+        {label}
+        <span className="sort-arrow" aria-hidden="true">
+          {current ? (filters.dir === 'asc' ? '▲' : '▼') : '↕'}
+        </span>
+      </button>
+    </th>
   );
 }
 

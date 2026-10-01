@@ -171,7 +171,7 @@ describe('checkLink: SSRF protection', () => {
     await checkLink('https://ua.example.com/', deps());
     const call = net.fetchMock.mock.calls.find(([u]) => String(u).startsWith('https://ua.example.com'))!;
     const headers = new Headers((call[1] as RequestInit).headers);
-    expect(headers.get('User-Agent')).toMatch(/BacklinkHealthChecker/);
+    expect(headers.get('User-Agent')).toMatch(/LinkLedgerSEO/);
     expect(headers.get('Cookie')).toBeNull();
     expect((call[1] as RequestInit).redirect).toBe('manual');
   });

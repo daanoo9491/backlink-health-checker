@@ -11,7 +11,7 @@ export const ORIGIN = 'https://bhc.test';
 
 const baseEnv = {
   APP_ENV: 'test',
-  APP_NAME: 'Backlink Health Checker',
+  APP_NAME: 'LinkLedger SEO',
   AUTH_EMAIL: 'Marketing@Example.com',
   AUTH_PASSWORD: 'correct horse battery staple',
   SESSION_SECRET: 'x'.repeat(40),

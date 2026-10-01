@@ -1,13 +1,21 @@
 import { useEffect, useId, useState } from 'react';
 import type { RowFacets, RowFilterGroup, RowFilters } from '../../shared/api';
+import { ISSUE_CATEGORIES } from '../../shared/issues';
 import { formatNumber } from '../lib/format';
 
-const GROUPS: { key: RowFilterGroup; label: string; tone?: string }[] = [
+/** `sub` groups (issue categories) appear only while selected, from the Issues list. */
+const GROUPS: { key: RowFilterGroup; label: string; tone?: string; sub?: boolean }[] = [
   { key: 'all', label: 'All' },
   { key: 'active', label: 'Active', tone: 'active' },
   { key: 'dead', label: 'Dead', tone: 'dead' },
   { key: 'redirected', label: 'Redirected', tone: 'redirected' },
   { key: 'review', label: 'Need a look', tone: 'review' },
+  ...ISSUE_CATEGORIES.filter((c) => c.tone === 'review').map((c) => ({
+    key: c.key as RowFilterGroup,
+    label: c.label,
+    tone: 'review',
+    sub: true,
+  })),
   { key: 'waiting', label: 'Waiting', tone: 'pending' },
   { key: 'skipped', label: 'Skipped', tone: 'pending' },
 ];
@@ -42,7 +50,7 @@ export function RowFilterBar({ filters, facets, onChange }: Props) {
   const active = filters.group !== 'all' || filters.sheet || filters.http || filters.q;
   // Hide groups that are empty (except All and the one selected) to keep the bar short.
   const visible = GROUPS.filter(
-    (g) => g.key === 'all' || g.key === filters.group || !facets || facets.groups[g.key] > 0,
+    (g) => g.key === 'all' || g.key === filters.group || (!g.sub && (!facets || facets.groups[g.key] > 0)),
   );
 
   return (

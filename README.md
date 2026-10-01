@@ -1,8 +1,17 @@
-# Backlink Health Checker
+# LinkLedger SEO
 
-Upload an Excel workbook of backlinks (or just paste links), find out which backlink pages are still live, and download the results. Built for Marketing users. The app runs on Cloudflare; data is stored in Supabase Postgres.
+_Backlink & index monitor. Formerly “Backlink Health Checker”: the repo, Worker names and web addresses keep the old name, so nothing had to move._
 
-> **Current status: Phase 5 (background checking).** Upload a workbook or paste links; every unique link is checked once and classified (Active, Dead, Redirected, Blocked, Rate limited, Server error, Timed out, Could not connect), with SSRF protection on every request and redirect. Checking runs in the background on Cloudflare Queues, so you can close the browser; temporary failures are retried automatically, and a scan can be paused and resumed. Data lives in Supabase Postgres, reached through Cloudflare Hyperdrive. See [docs/PHASES.md](docs/PHASES.md).
+An internal tool for our Marketing team, with two tools behind one sign-in:
+
+- **Link Health**: upload an Excel workbook of backlinks (or just paste links) and find out which backlink pages are still live.
+- **Index Checker** (coming in Phases 8–10): whether each page is in Google, or able to be.
+
+The app runs on Cloudflare; data is stored in Supabase Postgres.
+
+> **Current status: Phase 6 (new name, two-tool layout).** Results can be sorted by row, backlink, status (most urgent first) or HTTP code; the summary cards and an “Issues to look at” list filter the table by issue category, each with advice on what to do.
+>
+> **Phase 5 (background checking).** Upload a workbook or paste links; every unique link is checked once and classified (Active, Dead, Redirected, Blocked, Rate limited, Server error, Timed out, Could not connect), with SSRF protection on every request and redirect. Checking runs in the background on Cloudflare Queues, so you can close the browser; temporary failures are retried automatically, and a scan can be paused and resumed. Data lives in Supabase Postgres, reached through Cloudflare Hyperdrive. See [docs/PHASES.md](docs/PHASES.md).
 
 ## Architecture
 

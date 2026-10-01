@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router';
+import { BRAND } from '../../shared/brand';
 import { useAuth } from '../auth/auth-context';
 import { RequestError } from '../api/client';
 import { Icon } from '../components/Icon';
@@ -17,7 +18,7 @@ export function LoginPage() {
   const [showReset, setShowReset] = useState(false);
 
   useEffect(() => {
-    document.title = 'Sign in · Backlink Health Checker';
+    document.title = `Sign in · ${BRAND.name}`;
   }, []);
 
   if (user) return <Navigate to={from} replace />;
@@ -46,9 +47,11 @@ export function LoginPage() {
         <span className="brand-mark brand-mark-large">
           <Icon name="link" size={28} />
         </span>
-        <h1 className="login-title">Backlink Health Checker</h1>
+        <h1 className="login-title">{BRAND.name}</h1>
+        <p className="login-tagline">{BRAND.tagline}</p>
         <p className="login-lead">
-          Upload your backlink sheet. We open every link for you and tell you which ones still work.
+          Upload your backlink sheet. We open every link for you and tell you which ones still work, and soon whether
+          Google can index them.
         </p>
       </div>
 

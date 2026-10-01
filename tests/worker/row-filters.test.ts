@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScanRowsResponse } from '../../src/shared/api';
 import type { Env } from '../../src/worker/env';
 import { fakeInternet } from './fake-net';
-import { drain, signedIn, testEnv } from './helpers';
+import { drain, signedIn, sql, testEnv } from './helpers';
 
 let env: Env;
 let api: Awaited<ReturnType<typeof signedIn>>;
@@ -92,11 +92,35 @@ describe('row filters', () => {
       dead: 1,
       redirected: 1,
       review: 1,
+      unreachable: 0,
+      site_error: 0,
+      refused: 1,
       waiting: 0,
       skipped: 1,
     });
     expect(r.facets.sheets).toEqual(['A', 'B']);
     expect(r.facets.httpCodes).toEqual([200, 403, 404]);
+  });
+
+  it('counts unique links per result for the whole scan, ignoring filters', async () => {
+    const expected = { byStatus: { ACTIVE: 2, DEAD: 1, BLOCKED: 1, REDIRECTED: 1 }, retrying: 0 };
+    expect((await get('')).facets.links).toEqual(expected);
+    expect((await get('sheet=A&status=dead&q=zzz')).facets.links).toEqual(expected);
+  });
+
+  it('filters by issue category', async () => {
+    expect(rowIds(await get('status=refused'))).toEqual(['B2']);
+    expect(rowIds(await get('status=site_error'))).toEqual([]);
+    expect(rowIds(await get('status=unreachable'))).toEqual([]);
+  });
+
+  it('a link waiting for its automatic retry counts as waiting only', async () => {
+    await sql('UPDATE unique_urls SET retry_at = 9999999999 WHERE scan_id = $1 AND url_index = 2', [id]);
+    const r = await get('');
+    expect(r.facets.groups).toMatchObject({ review: 0, refused: 0, waiting: 1 });
+    expect(r.facets.links.retrying).toBe(1);
+    expect(r.facets.links.byStatus.BLOCKED).toBeUndefined();
+    expect(rowIds(await get('status=waiting'))).toEqual(['B2']);
   });
 
   it('filters by status group', async () => {
@@ -143,5 +167,43 @@ describe('row filters', () => {
     const r = await get('status=active&pageSize=25&page=2');
     expect(r.rows).toHaveLength(0);
     expect(r.total).toBe(3);
+  });
+});
+
+describe('row sorting', () => {
+  it('keeps workbook order by default', async () => {
+    expect(rowIds(await get(''))).toEqual(['A2', 'A3', 'A4', 'B2', 'B3', 'B4', 'B5']);
+    expect(rowIds(await get('sort=row&dir=desc'))).toEqual(['B5', 'B4', 'B3', 'B2', 'A4', 'A3', 'A2']);
+  });
+
+  it('sorts by status: most urgent first, skipped rows always last', async () => {
+    expect(rowIds(await get('sort=status'))).toEqual(['A3', 'B2', 'B3', 'A2', 'B4', 'B5', 'A4']);
+    expect(rowIds(await get('sort=status&dir=desc'))).toEqual(['A2', 'B4', 'B5', 'B3', 'B2', 'A3', 'A4']);
+  });
+
+  it('sorts by backlink address, case-insensitively', async () => {
+    expect(rowIds(await get('sort=url'))).toEqual(['A3', 'B2', 'A2', 'B4', 'B5', 'B3', 'A4']);
+  });
+
+  it('sorts by HTTP code, rows without a response last', async () => {
+    expect(rowIds(await get('sort=http'))).toEqual(['A2', 'B3', 'B4', 'B5', 'B2', 'A3', 'A4']);
+    expect(rowIds(await get('sort=http&dir=desc'))).toEqual(['A3', 'B2', 'A2', 'B3', 'B4', 'B5', 'A4']);
+  });
+
+  it('sorts within filters and pages', async () => {
+    const r = await get('status=active&sort=url&dir=desc&pageSize=25');
+    expect(rowIds(r)).toEqual(['B5', 'A2', 'B4']);
+  });
+
+  it('ignores unknown sort values', async () => {
+    expect(rowIds(await get(`sort=${encodeURIComponent('u.url; DROP TABLE scans')}&dir=sideways`))).toEqual([
+      'A2',
+      'A3',
+      'A4',
+      'B2',
+      'B3',
+      'B4',
+      'B5',
+    ]);
   });
 });
