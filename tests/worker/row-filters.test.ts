@@ -95,6 +95,12 @@ describe('row filters', () => {
       unreachable: 0,
       site_error: 0,
       refused: 1,
+      indexable: 0, // index results exist only in Index Checker scans
+      noindex: 0,
+      robots_blocked: 0,
+      canonical_elsewhere: 0,
+      not_reachable: 0,
+      index_unknown: 0,
       waiting: 0,
       skipped: 1,
     });

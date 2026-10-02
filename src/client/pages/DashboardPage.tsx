@@ -113,15 +113,41 @@ export function DashboardPage() {
 
       <section aria-labelledby="ic-card" className="stack">
         <h2 id="ic-card" className="tool-heading">
-          {TOOLS.indexChecker} <span className="nav-soon nav-soon-light">Soon</span>
+          {TOOLS.indexChecker}
         </h2>
         <div className="panel tool-card">
           <p>
-            See whether each page is in Google, or able to be: Google’s own answer for your sites in Search Console, and
-            honest indexability signals for everyone else’s.
+            Can Google index your backlink pages? Robots.txt, noindex and canonical for every page, with the evidence.
           </p>
-          <Link to="/index-checker">What’s coming</Link>
+          <div className="check-actions">
+            <Link to="/index-checker/new" className="button button-secondary">
+              New index check
+            </Link>
+            {data && data.indexChecks > 0 && (
+              <Link to="/index-checker" className="button button-quiet">
+                See all {formatNumber(data.indexChecks)} index {data.indexChecks === 1 ? 'check' : 'checks'}
+              </Link>
+            )}
+          </div>
         </div>
+        {data && data.recentIndexChecks.length > 0 && (
+          <ul className="recent-list">
+            {data.recentIndexChecks.map((s) => (
+              <li key={s.id}>
+                <Link to={`/scans/${s.id}`} className="recent-name">
+                  {s.fileName}
+                </Link>
+                <span className="recent-date">{formatDate(s.createdAt)}</span>
+                <span className="recent-count">
+                  {s.checkedCount
+                    ? `${formatNumber(s.indexableCount)} of ${formatNumber(s.uniqueUrls)} indexable`
+                    : `${formatNumber(s.uniqueUrls)} pages`}
+                </span>
+                <ScanStatusBadge status={s.status} />
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );

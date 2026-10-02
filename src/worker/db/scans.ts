@@ -1,3 +1,4 @@
+import { ROW_FILTER_GROUPS } from '../../shared/api';
 import type {
   RowFacets,
   RowFilterGroup,
@@ -8,9 +9,11 @@ import type {
   ScanStatus,
   ScanSummary,
   SheetInfo,
+  ScanTool,
   SortDir,
 } from '../../shared/api';
 import { ISSUE_CATEGORIES, REVIEW_STATUSES, STATUS_SORT_ORDER } from '../../shared/issues';
+import { INDEX_SORT_ORDER, INDEX_STATUSES, type IndexEvidence, type IndexStatus } from '../../shared/index-status';
 import { LINK_STATUSES, type LinkStatus } from '../../shared/status';
 import { iso, num, type Db } from './db';
 
@@ -42,6 +45,11 @@ export interface ScanRecord {
   started_at: string | Date | null;
   completed_at: string | Date | null;
   heartbeat_at: string | Date | null;
+  tool: ScanTool;
+  source_scan_id: string | null;
+  indexable_count: number;
+  index_issue_count: number;
+  index_unknown_count: number;
   chain_id?: string | null;
   app_host?: string | null;
 }
@@ -70,6 +78,11 @@ export function toSummary(r: ScanRecord): ScanSummary {
     startedAt: iso(r.started_at),
     completedAt: iso(r.completed_at),
     heartbeatAt: iso(r.heartbeat_at),
+    tool: r.tool,
+    sourceScanId: r.source_scan_id,
+    indexableCount: r.indexable_count,
+    indexIssueCount: r.index_issue_count,
+    indexUnknownCount: r.index_unknown_count,
   };
 }
 
@@ -86,11 +99,11 @@ export async function getScan(db: Db, userId: string, scanId: string): Promise<S
   return row ?? null;
 }
 
-export async function listScans(db: Db, userId: string, limit = 100): Promise<ScanSummary[]> {
-  const rows = await db.query<ScanRecord>('SELECT * FROM scans WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2', [
-    userId,
-    limit,
-  ]);
+export async function listScans(db: Db, userId: string, tool: ScanTool, limit = 100): Promise<ScanSummary[]> {
+  const rows = await db.query<ScanRecord>(
+    'SELECT * FROM scans WHERE user_id = $1 AND tool = $2 ORDER BY created_at DESC LIMIT $3',
+    [userId, tool, limit],
+  );
   return rows.map(toSummary);
 }
 
@@ -106,6 +119,9 @@ interface RowRecord {
   status: string | null;
   check_reason: string | null;
   page_title: string | null;
+  index_status: string | null;
+  index_reason: string | null;
+  index_evidence: IndexEvidence[] | null;
   retry_at: string | number | null;
   http_status: number | null;
   final_url: string | null;
@@ -130,21 +146,31 @@ const GROUP_SQL: Record<Exclude<RowFilterGroup, 'all'>, string> = {
   unreachable: `u.status IN (${inList(category('unreachable'))}) AND u.retry_at IS NULL`,
   site_error: `u.status IN (${inList(category('site_error'))}) AND u.retry_at IS NULL`,
   refused: `u.status IN (${inList(category('refused'))}) AND u.retry_at IS NULL`,
+  indexable: `u.index_status = 'INDEXABLE'`,
+  noindex: `u.index_status = 'NOINDEX' AND u.retry_at IS NULL`,
+  robots_blocked: `u.index_status = 'ROBOTS_BLOCKED' AND u.retry_at IS NULL`,
+  canonical_elsewhere: `u.index_status = 'CANONICAL_ELSEWHERE' AND u.retry_at IS NULL`,
+  not_reachable: `u.index_status = 'NOT_REACHABLE' AND u.retry_at IS NULL`,
+  index_unknown: `u.index_status = 'UNKNOWN' AND u.retry_at IS NULL`,
   waiting: `(u.status IN ('PENDING', 'CHECKING') OR u.retry_at IS NOT NULL)`,
   skipped: `r.url_index IS NULL`,
 };
 
 /** Most urgent first; skipped rows (no link) last. */
 const STATUS_RANK = `CASE u.status ${STATUS_SORT_ORDER.map((st, i) => `WHEN '${st}' THEN ${i}`).join(' ')} ELSE ${STATUS_SORT_ORDER.length} END`;
+/** For index checks: by index result, then (for links not judged yet) by link result. */
+const INDEX_RANK = `CASE u.index_status ${INDEX_SORT_ORDER.map((st, i) => `WHEN '${st}' THEN ${i}`).join(' ')} ELSE ${INDEX_SORT_ORDER.length} END`;
 
 /** ORDER BY for each sort; ties keep workbook order. Only these fixed strings reach SQL. */
-function orderBy(sort: RowSort, dir: SortDir): string {
+function orderBy(sort: RowSort, dir: SortDir, tool: ScanTool): string {
   const d = dir === 'desc' ? 'DESC' : 'ASC';
   switch (sort) {
     case 'url':
       return `lower(COALESCE(u.url, r.original_value)) ${d}, r.seq`;
     case 'status': // skipped rows (no link) stay at the end either way
-      return `(u.status IS NULL), ${STATUS_RANK} ${d}, r.seq`;
+      return tool === 'index'
+        ? `(u.status IS NULL), ${INDEX_RANK} ${d}, ${STATUS_RANK} ${d}, r.seq`
+        : `(u.status IS NULL), ${STATUS_RANK} ${d}, r.seq`;
     case 'http':
       return `u.http_status ${d} NULLS LAST, r.seq`;
     default:
@@ -188,6 +214,7 @@ export async function listRows(
   filters: RowFilters,
   /** Worksheet names, from the scan record (saves reading every row to list them). */
   sheetNames: string[],
+  tool: ScanTool = 'links',
 ): Promise<{ rows: ScanRowView[]; total: number; facets: RowFacets }> {
   const base = baseWhere(scanId, filters);
   const where = filters.group === 'all' ? base.sql : `${base.sql} AND ${GROUP_SQL[filters.group]}`;
@@ -202,9 +229,9 @@ export async function listRows(
     db.query<RowRecord>(
       `SELECT r.sheet_name, r.row_number, r.original_value, u.url, r.is_duplicate, r.invalid_reason,
               r.target_url, r.anchor_text, u.status, u.check_reason, u.page_title, u.retry_at, u.http_status, u.final_url,
-              u.response_time_ms, u.checked_at
+              u.response_time_ms, u.checked_at, u.index_status, u.index_reason, u.index_evidence
        ${FROM} WHERE ${where}
-       ORDER BY ${orderBy(filters.sort, filters.dir)}
+       ORDER BY ${orderBy(filters.sort, filters.dir, tool)}
        LIMIT $${n + 1} OFFSET $${n + 2}`,
       [...base.params, pageSize, (page - 1) * pageSize],
     ),
@@ -213,19 +240,25 @@ export async function listRows(
       base.params,
     ),
     // One pass over the scan's links gives both the HTTP codes and the per-result counts.
-    db.query<{ status: string; retrying: boolean; code: number | null; n: number }>(
-      `SELECT status, (retry_at IS NOT NULL) AS retrying, http_status AS code, COUNT(*)::int AS n
+    db.query<{ status: string; retrying: boolean; code: number | null; idx: string | null; n: number }>(
+      `SELECT status, (retry_at IS NOT NULL) AS retrying, http_status AS code, index_status AS idx,
+              COUNT(*)::int AS n
        FROM unique_urls WHERE scan_id = $1
-       GROUP BY 1, 2, 3`,
+       GROUP BY 1, 2, 3, 4`,
       [scanId],
     ),
   ]);
 
   const byStatus: Partial<Record<LinkStatus, number>> = {};
+  const byIndex: Partial<Record<IndexStatus, number>> = {};
   let retrying = 0;
   const codes = new Set<number>();
   for (const l of links) {
     if (l.code !== null) codes.add(num(l.code));
+    if (l.idx && !l.retrying && (INDEX_STATUSES as readonly string[]).includes(l.idx)) {
+      const ix = l.idx as IndexStatus;
+      byIndex[ix] = (byIndex[ix] ?? 0) + num(l.n);
+    }
     if (l.retrying) retrying += num(l.n);
     else if ((LINK_STATUSES as readonly string[]).includes(l.status)) {
       const st = l.status as LinkStatus;
@@ -237,21 +270,14 @@ export async function listRows(
   return {
     total: num(count[0]?.n),
     facets: {
-      groups: {
-        all: num(f.all_rows),
-        active: num(f.active),
-        dead: num(f.dead),
-        redirected: num(f.redirected),
-        review: num(f.review),
-        unreachable: num(f.unreachable),
-        site_error: num(f.site_error),
-        refused: num(f.refused),
-        waiting: num(f.waiting),
-        skipped: num(f.skipped),
-      },
+      groups: Object.fromEntries(ROW_FILTER_GROUPS.map((g) => [g, num(f[g === 'all' ? 'all_rows' : g])])) as Record<
+        RowFilterGroup,
+        number
+      >,
       httpCodes: [...codes].sort((a, b) => a - b),
       sheets: sheetNames,
       links: { byStatus, retrying },
+      index: byIndex,
     },
     rows: rows.map((r) => ({
       sheet: r.sheet_name,
@@ -265,6 +291,9 @@ export async function listRows(
       status: r.status,
       checkReason: r.check_reason,
       pageTitle: r.page_title,
+      indexStatus: (r.index_status as IndexStatus | null) ?? null,
+      indexReason: r.index_reason,
+      indexEvidence: r.index_evidence,
       retryAt: r.retry_at === null ? null : new Date(Number(r.retry_at) * 1000).toISOString(),
       httpStatus: r.http_status,
       finalUrl: r.final_url,

@@ -1,13 +1,6 @@
-import { STATUS_INFO, type LinkStatus, type StatusTone } from '../../shared/status';
-import { Icon, type IconName } from './Icon';
-
-const TONE_ICON: Record<StatusTone, IconName> = {
-  active: 'check',
-  dead: 'cross',
-  review: 'alert',
-  redirected: 'arrow',
-  pending: 'dots',
-};
+import { STATUS_INFO, type LinkStatus } from '../../shared/status';
+import { Icon } from './Icon';
+import { TONE_ICON } from './tone-icon';
 
 /**
  * Status badge: colour + icon shape + text, so it works for colour-blind

@@ -91,15 +91,18 @@ export async function processScanMessage(
   queue: QueueLike,
   msg: ScanMessage,
 ): Promise<MessageOutcome> {
-  const [scan] = await db.query<Pick<ScanRecord, 'status'> & { chain_id: string | null; app_host: string | null }>(
-    'SELECT status, chain_id, app_host FROM scans WHERE id = $1',
-    [msg.scanId],
-  );
+  const [scan] = await db.query<
+    Pick<ScanRecord, 'status' | 'tool'> & { chain_id: string | null; app_host: string | null }
+  >('SELECT status, chain_id, app_host, tool FROM scans WHERE id = $1', [msg.scanId]);
   if (!scan) return { kind: 'dropped', why: 'missing' }; // deleted meanwhile
   if (scan.chain_id !== msg.chain) return { kind: 'dropped', why: 'old-chain' };
   if (scan.status !== 'queued' && scan.status !== 'running') return { kind: 'dropped', why: 'not-active' };
 
-  const outcome = await runCheckBatch(db, env, msg.scanId, { ownHost: scan.app_host ?? '', batchSize: msg.size });
+  const outcome = await runCheckBatch(db, env, msg.scanId, {
+    ownHost: scan.app_host ?? '',
+    batchSize: msg.size,
+    index: scan.tool === 'index',
+  });
   if (outcome.remaining === 0 || outcome.scan?.status === 'paused') return { kind: 'done' };
 
   const next: ScanMessage = { scanId: msg.scanId, chain: msg.chain };

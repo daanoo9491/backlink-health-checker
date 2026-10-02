@@ -199,6 +199,35 @@ describe('unusual but valid XML', () => {
   });
 });
 
+describe('Index Checker sheets', () => {
+  const build = (sheetXml: string) =>
+    zipSync({
+      'xl/workbook.xml': strToU8(
+        `<x:workbook xmlns:x="m" xmlns:r="r"><x:sheets><x:sheet name="S" sheetId="1" r:id="rId1"/></x:sheets></x:workbook>`,
+      ),
+      'xl/_rels/workbook.xml.rels': strToU8(
+        `<Relationships><Relationship Id="rId1" Target="/xl/worksheets/sheet1.xml" Type="ws"/></Relationships>`,
+      ),
+      'xl/worksheets/sheet1.xml': strToU8(sheetXml),
+    });
+  const sheetWith = (header: string) => `<worksheet><sheetData>
+      <row r="1"><c r="A1" t="inlineStr"><is><t>${header}</t></is></c><c r="B1" t="inlineStr"><is><t>Target URL</t></is></c></row>
+      <row r="2"><c r="A2" t="inlineStr"><is><t>https://c.example.com/page</t></is></c><c r="B2" t="inlineStr"><is><t>https://lanop.co.uk/</t></is></c></row>
+    </sheetData></worksheet>`;
+
+  it('accepts URL, Page, Address and Link columns for index checks', () => {
+    for (const h of ['URL', 'urls', 'Page URL', 'Address', 'Links', 'Backlinks']) {
+      const r = importBacklinks(readXlsx(build(sheetWith(h))), 't.xlsx', 1, { tool: 'index' });
+      expect(r.rows[0]?.url).toBe('https://c.example.com/page');
+      expect(r.rows[0]?.targetUrl).toBe('https://lanop.co.uk/');
+    }
+  });
+
+  it('Link Health still needs a Backlinks column', () => {
+    expect(failCode(() => importBacklinks(readXlsx(build(sheetWith('URL'))), 't.xlsx', 1))).toBe('NO_BACKLINKS_COLUMN');
+  });
+});
+
 describe('excelDateToIso', () => {
   it('converts serial dates', () => {
     expect(excelDateToIso(46095)).toBe('2026-03-14');

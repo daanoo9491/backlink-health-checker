@@ -1,5 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import type { RowFacets, RowFilterGroup, RowFilters } from '../../shared/api';
+import { INDEX_GROUP, type ScanTool } from '../../shared/api';
+import { INDEX_STATUSES, INDEX_STATUS_INFO } from '../../shared/index-status';
 import { ISSUE_CATEGORIES } from '../../shared/issues';
 import { formatNumber } from '../lib/format';
 
@@ -20,13 +22,26 @@ const GROUPS: { key: RowFilterGroup; label: string; tone?: string; sub?: boolean
   { key: 'skipped', label: 'Skipped', tone: 'pending' },
 ];
 
+/** Index Checker scans filter by index result instead. */
+const INDEX_GROUPS: { key: RowFilterGroup; label: string; tone?: string; sub?: boolean }[] = [
+  { key: 'all', label: 'All' },
+  ...INDEX_STATUSES.map((s) => ({
+    key: INDEX_GROUP[s],
+    label: INDEX_STATUS_INFO[s].label,
+    tone: INDEX_STATUS_INFO[s].tone,
+  })),
+  { key: 'waiting', label: 'Waiting', tone: 'pending' },
+  { key: 'skipped', label: 'Skipped', tone: 'pending' },
+];
+
 interface Props {
   filters: RowFilters;
   facets: RowFacets | null;
   onChange: (next: Partial<RowFilters>) => void;
+  tool?: ScanTool;
 }
 
-export function RowFilterBar({ filters, facets, onChange }: Props) {
+export function RowFilterBar({ filters, facets, onChange, tool = 'links' }: Props) {
   const searchId = useId();
   const sheetId = useId();
   const httpId = useId();
@@ -49,7 +64,7 @@ export function RowFilterBar({ filters, facets, onChange }: Props) {
 
   const active = filters.group !== 'all' || filters.sheet || filters.http || filters.q;
   // Hide groups that are empty (except All and the one selected) to keep the bar short.
-  const visible = GROUPS.filter(
+  const visible = (tool === 'index' ? INDEX_GROUPS : GROUPS).filter(
     (g) => g.key === 'all' || g.key === filters.group || (!g.sub && (!facets || facets.groups[g.key] > 0)),
   );
 

@@ -5,6 +5,7 @@ export interface WorkerRequest {
   buffer: ArrayBuffer;
   fileName: string;
   fileSize: number;
+  tool: 'links' | 'index';
 }
 
 export type ImportFailureCode = XlsxErrorCode | ImportErrorCode | 'UNKNOWN';

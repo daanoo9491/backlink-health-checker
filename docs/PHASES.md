@@ -149,3 +149,20 @@ Checking moved from the browser to the server, on Cloudflare Queues. Closing the
 
 - Pages built entirely by JavaScript show their real content only in a browser, so a JavaScript-only “not found” screen isn't seen (they stay Active).
 - A short link (e.g. bit.ly) that points to a home page would be reported as a soft 404; backlink sheets list article pages, so this should be rare.
+
+## Decisions recorded in Phase 8 (Index Checker, part 1: indexability signals)
+
+- **Index checks are scans with `tool = 'index'`.** They reuse the whole pipeline: Excel upload or pasted URLs (an index sheet's link column may be called URL, Page, Address, Link or Backlinks; Link Health still needs “Backlinks”), saving in chunks, background checking on the queue, pause/resume/retries, filters, sorting and pagination. Each tool has its own list (`GET /api/scans?tool=index`) and its own Dashboard section.
+- **Run on a Link Health scan:** `POST /api/scans/:id/index-check` copies the scan's links and rows (with their original columns) into a new index check in one transaction and starts it. The original scan is untouched. Offered on finished scans (“Check indexing for these links”) and on the Index Checker page.
+- **One request per page, as before.** Meta robots, canonical, X-Robots-Tag and the HTTP `Link` header are read from the same response as the link check (via the Phase 7 page reader); only robots.txt is extra.
+- **robots.txt** (`src/worker/indexing/robots-txt.ts`, RFC 9309 + Google's rules): the googlebot group(s) or else `*`, groups merged, product-token matching (`Googlebot/2.1` = googlebot; `Googlebot-Image` doesn't apply), longest match wins with Allow winning ties, `*` and `$`, query strings included, consistent percent-encoding, empty Disallow allows all, `/robots.txt` always allowed, 500 KiB limit. Fetched with the same SSRF protection; 2xx → rules, 4xx (not 429) or too many redirects → “no robots.txt, everything allowed”, 429/5xx/timeouts → Unknown. **Cached per site** in `robots_cache` for 24 hours (30 minutes after a failure), shared by all scans; the 10-minute Cron clears copies older than 2 days.
+- **Results** (`src/shared/index-status.ts`, judged in `evaluate.ts`), strongest problem first: Page not reachable (gone, soft 404, redirected away, domain gone) → Unknown if the page couldn't be loaded (blocked, 429, 5xx, timeout) → Crawling blocked → Blocked from indexing (noindex in meta robots/googlebot or X-Robots-Tag, including `googlebot:` and `none` forms; for PDFs only the header counts) → Unknown if robots.txt couldn't be read → Canonical points elsewhere (http/https, www and trailing-slash differences count as the same page; several different canonicals cancel out, as Google ignores them) → Indexable.
+- **Evidence for every result** (`index_evidence`): one line per signal (page, robots.txt with the deciding rule, meta tag, header, canonical), problems marked; conflicting signals are all listed (“Google can’t see the noindex while robots.txt blocks crawling”). Shown under “Evidence” on each row.
+- **Never “Not indexed”:** no label, description, advice, reason or evidence line can say it; a test runs every combination of link result, robots.txt outcome and page signals (11 × 2 × 5 × 7) and checks.
+- **Scan counters** for index checks (`indexable_count`, `index_issue_count`, `index_unknown_count`) are recounted with the existing per-batch recount, for the lists and Dashboard. An index batch uses at most 7 database queries (2 more than a Link Health batch: robots cache read and write).
+- **Checked against real sites** in Cloudflare's runtime: GitHub's real robots.txt blocks `/search?q=…` (`Disallow: /*?q=*`) and allows `/pricing`; a 404 is Page not reachable; a 403 is Unknown.
+
+## Known limits after Phase 8
+
+- Results describe whether a page **can** be indexed, not whether it **is**: Google's index can only be confirmed through Search Console (Phase 9, your own sites) or a search lookup (Phase 10, optional).
+- `<meta>` tags added by JavaScript aren't seen (Google usually does see them after rendering).

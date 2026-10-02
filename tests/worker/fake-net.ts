@@ -1,7 +1,15 @@
 import { vi } from 'vitest';
 
 type Page =
-  { status: number; location?: string; html?: string | Uint8Array; contentType?: string } | 'timeout' | 'reset';
+  | {
+      status: number;
+      location?: string;
+      html?: string | Uint8Array;
+      contentType?: string;
+      headers?: Record<string, string>;
+    }
+  | 'timeout'
+  | 'reset';
 
 /**
  * A tiny fake internet for checker tests. `dns` maps hostnames to IPs
@@ -33,6 +41,7 @@ export function fakeInternet(dns: Record<string, string[]>, pages: Record<string
     if (page === 'reset') throw new TypeError('Network connection lost.');
     if (!page) return new Response('not found', { status: 404 });
     const headers = new Headers(page.location ? { Location: page.location } : {});
+    for (const [k, v] of Object.entries(page.headers ?? {})) headers.set(k, v);
     if (page.html !== undefined) {
       headers.set('Content-Type', page.contentType ?? 'text/html; charset=utf-8');
       return new Response(page.html, { status: page.status, headers });

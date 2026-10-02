@@ -1,6 +1,7 @@
 /**
  * Types shared by the Worker (backend) and the React app (frontend).
  */
+import type { IndexEvidence, IndexStatus } from './index-status';
 import type { LinkStatus } from './status';
 
 export interface HealthResponse {
@@ -52,7 +53,13 @@ export interface SheetInfo {
 }
 
 /** Step 1 of saving a scan: describe it. Rows and URLs follow in chunks. */
+/** Which tool a scan belongs to. */
+export const SCAN_TOOLS = ['links', 'index'] as const;
+export type ScanTool = (typeof SCAN_TOOLS)[number];
+
 export interface CreateScanRequest {
+  /** Defaults to 'links' (Link Health). */
+  tool?: ScanTool;
   fileName: string;
   fileSize: number;
   worksheets: number;
@@ -126,6 +133,13 @@ export interface ScanSummary {
   completedAt: string | null;
   /** Last sign of life from background checking (null before it starts). */
   heartbeatAt: string | null;
+  tool: ScanTool;
+  /** For an index check made from a Link Health scan: that scan. */
+  sourceScanId: string | null;
+  indexableCount: number;
+  /** Blocked from indexing, crawling blocked, canonical elsewhere, not reachable. */
+  indexIssueCount: number;
+  indexUnknownCount: number;
 }
 
 export interface ScanDetail extends ScanSummary {
@@ -152,6 +166,10 @@ export interface ScanRowView {
   pageTitle: string | null;
   /** Set while a temporary failure waits for its automatic retry. */
   retryAt: string | null;
+  /** Index Checker scans only. */
+  indexStatus: IndexStatus | null;
+  indexReason: string | null;
+  indexEvidence: IndexEvidence[] | null;
   httpStatus: number | null;
   finalUrl: string | null;
   responseTimeMs: number | null;
@@ -173,10 +191,27 @@ export const ROW_FILTER_GROUPS = [
   'unreachable',
   'site_error',
   'refused',
+  // Index Checker results
+  'indexable',
+  'noindex',
+  'robots_blocked',
+  'canonical_elsewhere',
+  'not_reachable',
+  'index_unknown',
   'waiting',
   'skipped',
 ] as const;
 export type RowFilterGroup = (typeof ROW_FILTER_GROUPS)[number];
+
+/** Filter group for each index result. */
+export const INDEX_GROUP: Record<IndexStatus, RowFilterGroup> = {
+  INDEXABLE: 'indexable',
+  NOINDEX: 'noindex',
+  ROBOTS_BLOCKED: 'robots_blocked',
+  CANONICAL_ELSEWHERE: 'canonical_elsewhere',
+  NOT_REACHABLE: 'not_reachable',
+  UNKNOWN: 'index_unknown',
+};
 
 /** Columns the results table can be sorted by. 'row' = order in the workbook. */
 export const ROW_SORTS = ['row', 'url', 'status', 'http'] as const;
@@ -205,6 +240,8 @@ export interface RowFacets {
    * Links waiting for an automatic retry are counted in `retrying` only.
    */
   links: { byStatus: Partial<Record<LinkStatus, number>>; retrying: number };
+  /** Unique links per index result (Index Checker scans), excluding links waiting for a retry. */
+  index: Partial<Record<IndexStatus, number>>;
 }
 
 export interface ScanRowsResponse {
@@ -217,10 +254,17 @@ export interface ScanRowsResponse {
 }
 
 export interface DashboardSummary {
+  /** Link Health scans only; index checks are counted separately. */
   totalScans: number;
   urlsChecked: number;
   activeLinks: number;
   deadLinks: number;
   issuesFound: number;
   recentScans: ScanSummary[];
+  indexChecks: number;
+  recentIndexChecks: ScanSummary[];
+}
+
+export interface IndexCheckFromScanResponse {
+  id: string;
 }

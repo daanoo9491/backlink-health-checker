@@ -8,7 +8,7 @@ export class ReadFileError extends Error {
 }
 
 /** Reads a workbook in a background worker. Rejects with ReadFileError. */
-export async function readBacklinkFile(file: File): Promise<ImportResult> {
+export async function readBacklinkFile(file: File, tool: 'links' | 'index' = 'links'): Promise<ImportResult> {
   const buffer = await file.arrayBuffer();
   const worker = new Worker(new URL('./import.worker.ts', import.meta.url), { type: 'module' });
   try {
@@ -16,7 +16,7 @@ export async function readBacklinkFile(file: File): Promise<ImportResult> {
       worker.onmessage = (e: MessageEvent<WorkerResponse>) =>
         e.data.ok ? resolve(e.data.result) : reject(new ReadFileError(e.data.code));
       worker.onerror = () => reject(new ReadFileError('UNKNOWN'));
-      const msg: WorkerRequest = { buffer, fileName: file.name, fileSize: file.size };
+      const msg: WorkerRequest = { buffer, fileName: file.name, fileSize: file.size, tool };
       worker.postMessage(msg, [buffer]);
     });
   } finally {

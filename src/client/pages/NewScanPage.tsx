@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type ClipboardEvent } from 'react';
 import { useNavigate } from 'react-router';
-import { SCAN_LIMITS } from '../../shared/api';
+import { SCAN_LIMITS, type ScanTool } from '../../shared/api';
 import { INVALID_REASON_TEXT } from '../../shared/url';
 import { RequestError } from '../api/client';
 import { FileDrop } from '../components/FileDrop';
@@ -36,11 +36,13 @@ function stateForNewFile(file: File): State {
   return problem ? { kind: 'error', title: problem, help: '' } : { kind: 'reading', file };
 }
 
-export function NewScanPage() {
+/** Used by both tools: Link Health ("New scan") and Index Checker ("New index check"). */
+export function NewScanPage({ tool = 'links' }: { tool?: ScanTool }) {
   const navigate = useNavigate();
+  const index = tool === 'index';
   // A file or links dropped on the Dashboard start straight away.
   const [state, setState] = useState<State>(() => {
-    const h = peekHandOff();
+    const h = index ? null : peekHandOff();
     if (h?.kind === 'file') return stateForNewFile(h.file);
     if (h?.kind === 'text') return stateForText(h.text);
     return { kind: 'idle' };
@@ -52,19 +54,27 @@ export function NewScanPage() {
     if (!readingFile) return;
     clearHandOff();
     let cancelled = false; // ignore results for a file the user moved away from
-    readBacklinkFile(readingFile)
+    readBacklinkFile(readingFile, tool)
       .then((result) => {
         if (!cancelled) setState({ kind: 'preview', result });
       })
       .catch((e: unknown) => {
         if (cancelled) return;
         const code = e instanceof ReadFileError ? e.code : 'UNKNOWN';
-        setState({ kind: 'error', ...IMPORT_ERROR_TEXT[code] });
+        setState({
+          kind: 'error',
+          ...(tool === 'index' && code === 'NO_BACKLINKS_COLUMN'
+            ? {
+                title: 'We couldn’t find a column of page addresses.',
+                help: 'Head the column “URL”, “Page” or “Backlinks” and upload the file again.',
+              }
+            : IMPORT_ERROR_TEXT[code]),
+        });
       });
     return () => {
       cancelled = true;
     };
-  }, [readingFile]);
+  }, [readingFile, tool]);
 
   // Pasted or dropped links: save them as a scan and go straight to checking.
   const linksText = state.kind === 'links' ? state.text : null;
@@ -75,7 +85,11 @@ export function NewScanPage() {
     (async () => {
       let result: ImportResult;
       try {
-        result = importPastedText(linksText, `Pasted links, ${formatDate(new Date().toISOString())}`);
+        result = importPastedText(
+          linksText,
+          `${index ? 'Pasted URLs' : 'Pasted links'}, ${formatDate(new Date().toISOString())}`,
+          tool,
+        );
       } catch (e) {
         if (cancelled) return;
         if (e instanceof TooManyLinksError) {
@@ -97,6 +111,7 @@ export function NewScanPage() {
       }
       try {
         const id = await saveScan(result, {
+          tool,
           onProgress: (p) => !cancelled && setState((st) => (st.kind === 'links' ? { ...st, saving: p } : st)),
           onCreated: () => undefined,
         });
@@ -113,7 +128,7 @@ export function NewScanPage() {
     return () => {
       cancelled = true;
     };
-  }, [linksText, navigate]);
+  }, [linksText, navigate, index, tool]);
 
   const acceptText = useCallback((text: string) => {
     if (text.trim()) setState(stateForText(text));
@@ -147,6 +162,7 @@ export function NewScanPage() {
     update({ saving: { done: 0, total: 1 }, saveError: undefined });
     try {
       const id = await saveScan(result, {
+        tool,
         resumeId,
         onProgress: (p) => update({ saving: p }),
         onCreated: (newId) => {
@@ -189,12 +205,17 @@ export function NewScanPage() {
             </div>
           )}
           <FileDrop onFile={choose} onText={acceptText}>
-            <p className="drop-title">{state.kind === 'error' ? 'Try again' : 'Upload your backlink sheet'}</p>
+            <p className="drop-title">
+              {state.kind === 'error' ? 'Try again' : index ? 'Upload a sheet of URLs' : 'Upload your backlink sheet'}
+            </p>
             <p className="drop-sub">Drag your Excel file or links here, or browse for a file.</p>
-            <p className="drop-meta">Excel workbook (.xlsx), up to 10 MB. Needs a column called “Backlinks”.</p>
+            <p className="drop-meta">
+              Excel workbook (.xlsx), up to 10 MB.{' '}
+              {index ? 'Needs a column called “URL”, “Page” or “Backlinks”.' : 'Needs a column called “Backlinks”.'}
+            </p>
           </FileDrop>
           <PasteBox onSubmit={acceptText} />
-          <SheetHelp />
+          <SheetHelp index={index} />
         </>
       )}
 
@@ -386,7 +407,7 @@ function Notes({ result }: { result: ImportResult }) {
     );
   if (t.blank > 0)
     notes.push(
-      `${formatNumber(t.blank)} ${t.blank === 1 ? 'row has' : 'rows have'} an empty Backlinks cell and will be skipped.`,
+      `${formatNumber(t.blank)} ${t.blank === 1 ? 'row has' : 'rows have'} an empty link cell and will be skipped.`,
     );
   if (result.optionalColumns.length > 0) {
     const names = result.optionalColumns.map((c) => OPTIONAL_COLUMN_LABELS[c]).join(', ');
@@ -464,17 +485,25 @@ function PasteBox({ onSubmit }: { onSubmit: (text: string) => void }) {
   );
 }
 
-function SheetHelp() {
+function SheetHelp({ index }: { index: boolean }) {
   return (
     <section className="help" aria-labelledby="sheet-help">
       <h2 id="sheet-help" className="section-title">
         Getting your sheet ready
       </h2>
       <ul>
-        <li>
-          Put your backlink page addresses in a column headed <strong>Backlinks</strong>. Capitals and spaces don’t
-          matter, and the heading doesn’t have to be on the first row.
-        </li>
+        {index ? (
+          <li>
+            Put the page addresses in a column headed <strong>URL</strong>, <strong>Page</strong>, <strong>Link</strong>{' '}
+            or <strong>Backlinks</strong>. Capitals and spaces don’t matter, and the heading doesn’t have to be on the
+            first row.
+          </li>
+        ) : (
+          <li>
+            Put your backlink page addresses in a column headed <strong>Backlinks</strong>. Capitals and spaces don’t
+            matter, and the heading doesn’t have to be on the first row.
+          </li>
+        )}
         <li>You can have several worksheets. We look through all of them, including hidden ones.</li>
         <li>Linked cells work too: if a cell says “View post” and links to the page, we use the link.</li>
         <li>Other columns, like Target URL or Anchor Text, are kept and added to your results.</li>

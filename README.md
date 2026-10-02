@@ -5,11 +5,13 @@ _Backlink & index monitor. Formerly “Backlink Health Checker”: the repo, Wor
 An internal tool for our Marketing team, with two tools behind one sign-in:
 
 - **Link Health**: upload an Excel workbook of backlinks (or just paste links) and find out which backlink pages are still live.
-- **Index Checker** (coming in Phases 8–10): whether each page is in Google, or able to be.
+- **Index Checker**: whether Google can index each page (robots.txt, noindex, canonical), with the evidence. Search Console results for your own sites follow in Phase 9.
 
 The app runs on Cloudflare; data is stored in Supabase Postgres.
 
-> **Current status: Phase 7 (page reader + soft 404).** Pages that answer “200 OK” but are really gone (a “Page not found” title or heading, a not-found message on a short page, or a removed page that now lands on a home page or an error address) are reported as **Soft 404**, with the reason. Bot-check pages count as Blocked. Each backlink page’s title is saved, shown and searchable.
+> **Current status: Phase 8 (Index Checker, part 1).** Paste or upload URLs, or run it on a Link Health scan. For each page it reads robots.txt (as Googlebot), the meta robots tag, the X-Robots-Tag header and the canonical, and reports **Indexable**, **Blocked from indexing**, **Crawling blocked**, **Canonical points elsewhere**, **Page not reachable** or **Unknown**, with the evidence. It never says “Not indexed”: only Search Console can (Phase 9).
+>
+> **Phase 7 (page reader + soft 404).** Pages that answer “200 OK” but are really gone (a “Page not found” title or heading, a not-found message on a short page, or a removed page that now lands on a home page or an error address) are reported as **Soft 404**, with the reason. Bot-check pages count as Blocked. Each backlink page’s title is saved, shown and searchable.
 >
 > **Phase 6 (new name, two-tool layout).** Results can be sorted by row, backlink, status (most urgent first) or HTTP code; the summary cards and an “Issues to look at” list filter the table by issue category, each with advice on what to do.
 >

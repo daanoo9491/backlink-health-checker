@@ -7,18 +7,28 @@ import { toSummary, type ScanRecord } from '../db/scans';
 export const dashboardRoutes = new Hono<AppContext>().get('/', requireAuth(), async (c) => {
   const userId = c.get('user')!.id;
   const db = c.get('db');
-  const [[t], recent] = await Promise.all([
+  const [[t], recent, [ix], recentIndex] = await Promise.all([
     db.query<{ scans: number; checked: number; active: number; dead: number; issues: number }>(
       `SELECT COUNT(*)::int AS scans,
               COALESCE(SUM(checked_count), 0)::int AS checked,
               COALESCE(SUM(active_count), 0)::int AS active,
               COALESCE(SUM(dead_count + soft_404_count), 0)::int AS dead,
               COALESCE(SUM(blocked_count + error_count), 0)::int AS issues
-       FROM scans WHERE user_id = $1 AND status <> 'uploading'`,
+       FROM scans WHERE user_id = $1 AND tool = 'links' AND status <> 'uploading'`,
       [userId],
     ),
     db.query<ScanRecord>(
-      `SELECT * FROM scans WHERE user_id = $1 AND status <> 'uploading' ORDER BY created_at DESC LIMIT 5`,
+      `SELECT * FROM scans WHERE user_id = $1 AND tool = 'links' AND status <> 'uploading'
+       ORDER BY created_at DESC LIMIT 5`,
+      [userId],
+    ),
+    db.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM scans WHERE user_id = $1 AND tool = 'index' AND status <> 'uploading'`,
+      [userId],
+    ),
+    db.query<ScanRecord>(
+      `SELECT * FROM scans WHERE user_id = $1 AND tool = 'index' AND status <> 'uploading'
+       ORDER BY created_at DESC LIMIT 3`,
       [userId],
     ),
   ]);
@@ -29,6 +39,8 @@ export const dashboardRoutes = new Hono<AppContext>().get('/', requireAuth(), as
     deadLinks: t?.dead ?? 0,
     issuesFound: t?.issues ?? 0,
     recentScans: recent.map(toSummary),
+    indexChecks: ix?.n ?? 0,
+    recentIndexChecks: recentIndex.map(toSummary),
   };
   return c.json(summary);
 });

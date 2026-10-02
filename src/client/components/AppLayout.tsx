@@ -24,7 +24,10 @@ const NAV: { section?: string; items: NavItem[] }[] = [
   },
   {
     section: TOOLS.indexChecker,
-    items: [{ to: '/index-checker', label: 'Check URLs', icon: 'search', soon: true }],
+    items: [
+      { to: '/index-checker/new', label: 'New index check', icon: 'search' },
+      { to: '/index-checker', label: 'Index checks', icon: 'history', end: true },
+    ],
   },
   { items: [{ to: '/settings', label: 'Settings', icon: 'settings' }] },
 ];
@@ -34,6 +37,7 @@ const TITLES: Record<string, string> = {
   '/scans/new': 'New scan',
   '/scans': 'Scan history',
   '/index-checker': TOOLS.indexChecker,
+  '/index-checker/new': 'New index check',
   '/settings': 'Settings',
 };
 

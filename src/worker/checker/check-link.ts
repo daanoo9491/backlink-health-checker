@@ -11,6 +11,7 @@ import type { Resolver } from './dns';
 import { extractFacts } from './page-facts';
 import { readPage } from './page-reader';
 import { judgePage } from './soft-404';
+import type { PageSignals } from '../indexing/evaluate';
 
 export const MAX_REDIRECTS = 5;
 export const TIMEOUT_MS = 15_000;
@@ -34,6 +35,8 @@ export interface CheckResult {
   retryAfterSec?: number;
   /** The page's <title>, when it loaded as HTML. */
   pageTitle: string | null;
+  /** Indexing signals (meta robots, canonical, headers) when the page loaded. */
+  signals: PageSignals | null;
 }
 
 /** Reads a Retry-After header: seconds, or an HTTP date. */
@@ -64,6 +67,7 @@ const fail = (status: LinkStatus, reason: string, extra: Partial<CheckResult> = 
   error: reason,
   retryable: false,
   pageTitle: null,
+  signals: null,
   ...extra,
 });
 
@@ -87,21 +91,44 @@ async function guard(url: URL, deps: CheckDeps): Promise<CheckResult | null> {
   return fail('NETWORK_ERROR', 'Couldn’t look up the domain. Try again later', { retryable: true });
 }
 
-export async function checkLink(originalUrl: string, deps: CheckDeps): Promise<CheckResult> {
+const ACCEPT_HTML = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
+
+export type SafeFetch =
+  | {
+      kind: 'response';
+      /** The final, non-redirect response. Its body is unread: read or cancel it. */
+      res: Response;
+      startUrl: string;
+      finalUrl: string;
+      /** Time to the final response's headers. */
+      answeredMs: number;
+    }
+  | { kind: 'failed'; result: CheckResult };
+
+/**
+ * GET with every hop validated (see top of file), following up to
+ * MAX_REDIRECTS redirects by hand. Shared by the link check and robots.txt.
+ */
+export async function safeFetch(url: string, deps: CheckDeps, accept = ACCEPT_HTML): Promise<SafeFetch> {
   const timeoutMs = deps.timeoutMs ?? TIMEOUT_MS;
   const started = Date.now();
   let current: URL;
   try {
-    current = new URL(originalUrl);
+    current = new URL(url);
   } catch {
-    return fail('NETWORK_ERROR', 'Not a valid web address');
+    return { kind: 'failed', result: fail('NETWORK_ERROR', 'Not a valid web address') };
   }
   current.hash = ''; // never sent to servers
   const startUrl = current.href;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const blocked = await guard(current, deps);
-    if (blocked) return hop === 0 ? blocked : { ...blocked, finalUrl: current.href, redirected: true };
+    if (blocked) {
+      return {
+        kind: 'failed',
+        result: hop === 0 ? blocked : { ...blocked, finalUrl: current.href, redirected: true },
+      };
+    }
 
     if (!deps.budget.take()) throw new BudgetExhausted();
     let res: Response;
@@ -109,77 +136,104 @@ export async function checkLink(originalUrl: string, deps: CheckDeps): Promise<C
       res = await fetch(current.href, {
         method: 'GET',
         redirect: 'manual',
-        headers: {
-          'User-Agent': USER_AGENT,
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-GB,en;q=0.9',
-        },
+        headers: { 'User-Agent': USER_AGENT, Accept: accept, 'Accept-Language': 'en-GB,en;q=0.9' },
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (e) {
       const name = (e as Error)?.name;
       const extra = { finalUrl: current.href, redirected: hop > 0 };
       if (name === 'TimeoutError' || name === 'AbortError') {
-        return fail('TIMEOUT', `No response within ${Math.round(timeoutMs / 1000)} seconds`, {
-          ...extra,
-          retryable: true,
-        });
+        return {
+          kind: 'failed',
+          result: fail('TIMEOUT', `No response within ${Math.round(timeoutMs / 1000)} seconds`, {
+            ...extra,
+            retryable: true,
+          }),
+        };
       }
-      return fail('NETWORK_ERROR', 'Couldn’t connect to the site (connection or security certificate problem)', {
-        ...extra,
-        error: String((e as Error)?.message ?? e).slice(0, 300),
-        retryable: true,
-      });
+      return {
+        kind: 'failed',
+        result: fail('NETWORK_ERROR', 'Couldn’t connect to the site (connection or security certificate problem)', {
+          ...extra,
+          error: String((e as Error)?.message ?? e).slice(0, 300),
+          retryable: true,
+        }),
+      };
     }
 
-    const location = res.headers.get('Location');
-    const retryAfter = res.headers.get('Retry-After');
-    const answeredMs = Date.now() - started;
-    const ok = res.status >= 200 && res.status < 300;
-    // A page that loaded is read (size-capped) to spot soft 404s; any other
-    // body is never needed, so the connection is released straight away.
-    const page = ok ? await readPage(res) : null;
-    if (!ok) await res.body?.cancel().catch(() => undefined);
-
     if (res.status >= 300 && res.status < 400 && res.status !== 304) {
+      const location = res.headers.get('Location');
+      await res.body?.cancel().catch(() => undefined);
       if (!location) {
-        return fail('SERVER_ERROR', `HTTP ${res.status} redirect without a destination`, {
-          httpStatus: res.status,
-          finalUrl: current.href,
-        });
+        return {
+          kind: 'failed',
+          result: fail('SERVER_ERROR', `HTTP ${res.status} redirect without a destination`, {
+            httpStatus: res.status,
+            finalUrl: current.href,
+          }),
+        };
       }
       let next: URL;
       try {
         next = new URL(location, current);
       } catch {
-        return fail('SERVER_ERROR', 'Redirects to an invalid address', { httpStatus: res.status });
+        return {
+          kind: 'failed',
+          result: fail('SERVER_ERROR', 'Redirects to an invalid address', { httpStatus: res.status }),
+        };
       }
       next.hash = '';
       current = next;
       continue;
     }
-
-    const classified = classifyResponse(res.status, startUrl, current.href);
-    const facts = page?.isHtml ? extractFacts(page.html) : null;
-    // "200 OK" isn't the whole story: the page may say it's gone, or be a bot check.
-    const verdict = ok ? judgePage(startUrl, current.href, facts) : null;
-    const { status, reason } = verdict ?? classified;
-    return {
-      status,
-      httpStatus: res.status,
-      finalUrl: current.href,
-      redirected: current.href !== startUrl,
-      responseTimeMs: answeredMs,
-      reason,
-      error: null,
-      pageTitle: facts?.title ?? null,
-      // Rate limits and server errors are often temporary; everything else is a firm answer.
-      retryable: status === 'RATE_LIMITED' || status === 'SERVER_ERROR' || status === 'TIMEOUT',
-      ...(status === 'RATE_LIMITED' || status === 'SERVER_ERROR' ? { retryAfterSec: parseRetryAfter(retryAfter) } : {}),
-    };
+    return { kind: 'response', res, startUrl, finalUrl: current.href, answeredMs: Date.now() - started };
   }
-  return fail('SERVER_ERROR', `More than ${MAX_REDIRECTS} redirects (redirect loop)`, {
-    finalUrl: current.href,
-    redirected: true,
-  });
+  return {
+    kind: 'failed',
+    result: fail('SERVER_ERROR', `More than ${MAX_REDIRECTS} redirects (redirect loop)`, {
+      finalUrl: current.href,
+      redirected: true,
+    }),
+  };
+}
+
+export async function checkLink(originalUrl: string, deps: CheckDeps): Promise<CheckResult> {
+  const f = await safeFetch(originalUrl, deps);
+  if (f.kind === 'failed') return f.result;
+  const { res, startUrl, finalUrl } = f;
+
+  const retryAfter = res.headers.get('Retry-After');
+  const ok = res.status >= 200 && res.status < 300;
+  // A page that loaded is read (size-capped) to spot soft 404s and read its
+  // indexing signals; any other body is never needed, so it is released.
+  const page = ok ? await readPage(res) : null;
+  if (!ok) await res.body?.cancel().catch(() => undefined);
+
+  const classified = classifyResponse(res.status, startUrl, finalUrl);
+  const facts = page?.isHtml ? extractFacts(page.html) : null;
+  // "200 OK" isn't the whole story: the page may say it's gone, or be a bot check.
+  const verdict = ok ? judgePage(startUrl, finalUrl, facts) : null;
+  const { status, reason } = verdict ?? classified;
+  return {
+    status,
+    httpStatus: res.status,
+    finalUrl,
+    redirected: finalUrl !== startUrl,
+    responseTimeMs: f.answeredMs,
+    reason,
+    error: null,
+    pageTitle: facts?.title ?? null,
+    signals: ok
+      ? {
+          robotsMeta: facts?.robotsMeta ?? [],
+          canonicals: facts?.canonicals ?? [],
+          xRobotsTag: res.headers.get('X-Robots-Tag'),
+          linkHeader: res.headers.get('Link'),
+          isHtml: page?.isHtml ?? false,
+        }
+      : null,
+    // Rate limits and server errors are often temporary; everything else is a firm answer.
+    retryable: status === 'RATE_LIMITED' || status === 'SERVER_ERROR' || status === 'TIMEOUT',
+    ...(status === 'RATE_LIMITED' || status === 'SERVER_ERROR' ? { retryAfterSec: parseRetryAfter(retryAfter) } : {}),
+  };
 }

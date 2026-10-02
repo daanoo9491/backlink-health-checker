@@ -49,7 +49,9 @@ export function parseCreateScan(body: unknown): CreateScanRequest {
   const sheets = Array.isArray(b.sheets) && b.sheets.length <= SCAN_LIMITS.maxSheets ? b.sheets : fail('sheets');
   const headers =
     Array.isArray(b.headers) && b.headers.length <= SCAN_LIMITS.maxHeaderCount ? b.headers : fail('headers');
+  const tool = b.tool === undefined ? 'links' : b.tool === 'links' || b.tool === 'index' ? b.tool : fail('tool');
   return {
+    tool,
     fileName: str(b.fileName, 255, 'fileName'),
     fileSize: int(b.fileSize, 0, 50 * 1024 * 1024, 'fileSize'),
     worksheets: int(b.worksheets, 0, 10_000, 'worksheets'),

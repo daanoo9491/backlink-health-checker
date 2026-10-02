@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
+  INDEX_GROUP,
   ROW_FILTER_GROUPS,
   ROW_SORTS,
+  type IndexCheckFromScanResponse,
   type RowFilterGroup,
   type RowFilters,
   type RowSort,
@@ -11,6 +13,8 @@ import {
   type ScanRowView,
   type ScanSummary,
 } from '../../shared/api';
+import { TOOLS } from '../../shared/brand';
+import { INDEX_SORT_ORDER, INDEX_STATUSES, INDEX_STATUS_INFO, type IndexStatus } from '../../shared/index-status';
 import { ISSUE_CATEGORIES, REVIEW_STATUSES } from '../../shared/issues';
 import { STATUS_INFO, type LinkStatus } from '../../shared/status';
 import { INVALID_REASON_TEXT, type InvalidReason } from '../../shared/url';
@@ -19,6 +23,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { RowFilterBar } from '../components/RowFilterBar';
 import { ScanStatusBadge } from '../components/ScanStatusBadge';
 import { SheetsTable } from '../components/SheetsTable';
+import { IndexStatusBadge } from '../components/IndexStatusBadge';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatBytes, formatDate, formatNumber } from '../lib/format';
 import { isSafeHref } from '../lib/safe-link';
@@ -127,6 +132,19 @@ export function ScanPage() {
     [id],
   );
 
+  async function checkIndexing() {
+    setBusy(true);
+    setCheckError(null);
+    try {
+      const { id: newId } = await api<IndexCheckFromScanResponse>(`/scans/${id}/index-check`, { method: 'POST' });
+      navigate(`/scans/${newId}`);
+    } catch (e) {
+      setCheckError(e instanceof RequestError ? e.message : 'Couldn’t start the index check. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // While checking runs in the background, follow its progress. One small
   // request every few seconds; the table reloads only when something changed.
   const scanStatus = scan?.status;
@@ -187,7 +205,10 @@ export function ScanPage() {
     setDeleting(true);
     try {
       await api(`/scans/${id}`, { method: 'DELETE' });
-      navigate('/scans', { replace: true, state: { deleted: scan?.fileName } });
+      navigate(scan?.tool === 'index' ? '/index-checker' : '/scans', {
+        replace: true,
+        state: { deleted: scan?.fileName },
+      });
     } catch (e) {
       setDeleting(false);
       setConfirmDelete(false);
@@ -217,7 +238,11 @@ export function ScanPage() {
   // its automatic retry counts as Waiting only). Before that loads: the scan's totals.
   const links = rows?.facets.links;
   const count = (sts: readonly LinkStatus[]) => sts.reduce((n, st) => n + (links?.byStatus[st] ?? 0), 0);
-  const cards: { label: string; value: number; tone?: string; group: RowFilterGroup }[] = [
+  const isIndex = scan.tool === 'index';
+  const ix = rows?.facets.index;
+  const ixCount = (s: IndexStatus) => ix?.[s] ?? 0;
+  const waiting = links ? count(['PENDING', 'CHECKING']) + links.retrying : scan.uniqueUrls - scan.checkedCount;
+  const linkCards: { label: string; value: number; tone?: string; group: RowFilterGroup }[] = [
     { label: 'Active', value: links ? count(['ACTIVE']) : scan.activeCount, tone: 'active', group: 'active' },
     {
       label: 'Dead',
@@ -237,13 +262,33 @@ export function ScanPage() {
       tone: 'review',
       group: 'review',
     },
-    {
-      label: 'Waiting',
-      value: links ? count(['PENDING', 'CHECKING']) + links.retrying : scan.uniqueUrls - scan.checkedCount,
-      group: 'waiting',
-    },
+    { label: 'Waiting', value: waiting, group: 'waiting' },
   ];
-  const issues = links ? ISSUE_CATEGORIES.map((c) => ({ ...c, n: count(c.statuses) })).filter((c) => c.n > 0) : [];
+  const indexCards: { label: string; value: number; tone?: string; group: RowFilterGroup }[] = [
+    ...INDEX_STATUSES.map((s) => ({
+      label: INDEX_STATUS_INFO[s].label,
+      value: ixCount(s),
+      tone: ixCount(s) ? INDEX_STATUS_INFO[s].tone : undefined, // a zero isn't a warning
+      group: INDEX_GROUP[s],
+    })),
+    { label: 'Waiting', value: waiting, group: 'waiting' },
+  ];
+  const cards = isIndex ? indexCards : linkCards;
+  const issues: { key: string; group: RowFilterGroup; label: string; tone: string; advice: string; n: number }[] =
+    !links
+      ? []
+      : isIndex
+        ? INDEX_SORT_ORDER.filter((s) => s !== 'INDEXABLE' && ixCount(s) > 0).map((s) => ({
+            key: s,
+            group: INDEX_GROUP[s],
+            label: INDEX_STATUS_INFO[s].label,
+            tone: INDEX_STATUS_INFO[s].tone,
+            advice: INDEX_STATUS_INFO[s].advice,
+            n: ixCount(s),
+          }))
+        : ISSUE_CATEGORIES.map((c) => ({ ...c, group: c.key as RowFilterGroup, n: count(c.statuses) })).filter(
+            (c) => c.n > 0,
+          );
   const showRows = (group: RowFilterGroup) => {
     updateFilters({ group });
     document.getElementById('rows-heading')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -282,8 +327,24 @@ export function ScanPage() {
             {scan.worksheets === 1 ? 'worksheet' : 'worksheets'}
           </p>
         </div>
-        <ScanStatusBadge status={scan.status} />
+        <div className="scan-head-side">
+          {isIndex && <span className="tool-tag">{TOOLS.indexChecker}</span>}
+          <ScanStatusBadge status={scan.status} />
+        </div>
       </section>
+
+      {isIndex && (
+        <p className="notice notice-info">
+          These results show whether Google <strong>can</strong> index each page, from what any crawler can see. They
+          never say a page is “Not indexed”: only Google Search Console can confirm that.
+          {scan.sourceScanId && (
+            <>
+              {' '}
+              Made from <Link to={`/scans/${scan.sourceScanId}`}>a {TOOLS.linkHealth} scan</Link>.
+            </>
+          )}
+        </p>
+      )}
 
       {error && (
         <p className="notice notice-error" role="alert">
@@ -363,6 +424,25 @@ export function ScanPage() {
           </p>
         </div>
       )}
+      {!isIndex && scan.status === 'completed' && (
+        <section className="panel next-step" aria-labelledby="next-index">
+          <h2 id="next-index" className="section-title">
+            Next: can Google index these pages?
+          </h2>
+          <p>
+            Run the {TOOLS.indexChecker} on the same links: robots.txt, noindex and canonical for every page. This scan
+            stays as it is.
+          </p>
+          {checkError && (
+            <p className="notice notice-error" role="alert">
+              {checkError}
+            </p>
+          )}
+          <button type="button" className="button button-secondary" disabled={busy} onClick={checkIndexing}>
+            Check indexing for these links
+          </button>
+        </section>
+      )}
       {scan.status === 'uploading' && (
         <div className="notice notice-error" role="alert">
           <p className="notice-title">This upload didn’t finish.</p>
@@ -372,7 +452,10 @@ export function ScanPage() {
 
       <div className="stat-block">
         {started ? (
-          <ul className="stat-strip stat-cards" aria-label="Results by unique link. Choose one to show those rows.">
+          <ul
+            className={`stat-strip stat-cards${isIndex ? ' stat-cards-many' : ''}`}
+            aria-label="Results by unique link. Choose one to show those rows."
+          >
             {cards.map((c) => {
               const selected = filters.group === c.group;
               return (
@@ -425,7 +508,11 @@ export function ScanPage() {
                   </p>
                   <p className="issue-advice">{c.advice}</p>
                 </div>
-                <button type="button" className="button button-secondary button-small" onClick={() => showRows(c.key)}>
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => showRows(c.group)}
+                >
                   Show rows
                 </button>
               </li>
@@ -443,7 +530,7 @@ export function ScanPage() {
       <section aria-labelledby="rows-heading">
         <div className="section-head">
           <h2 id="rows-heading" className="section-title">
-            Backlinks
+            {isIndex ? 'Pages' : 'Backlinks'}
           </h2>
           {rows && rows.total > 0 && (
             <p className="form-hint" aria-live="polite">
@@ -453,17 +540,27 @@ export function ScanPage() {
             </p>
           )}
         </div>
-        <RowFilterBar filters={filters} facets={rows?.facets ?? null} onChange={updateFilters} />
+        <RowFilterBar
+          filters={filters}
+          facets={rows?.facets ?? null}
+          onChange={updateFilters}
+          tool={isIndex ? 'index' : 'links'}
+        />
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
                 <th scope="col">Sheet</th>
                 <SortHeader label="Row" sort="row" filters={filters} onSort={sortBy} className="num" />
-                <SortHeader label="Backlink" sort="url" filters={filters} onSort={sortBy} />
-                <SortHeader label="Status" sort="status" filters={filters} onSort={sortBy} />
+                <SortHeader label={isIndex ? 'Page' : 'Backlink'} sort="url" filters={filters} onSort={sortBy} />
+                <SortHeader
+                  label={isIndex ? 'Index result' : 'Status'}
+                  sort="status"
+                  filters={filters}
+                  onSort={sortBy}
+                />
                 <SortHeader label="HTTP" sort="http" filters={filters} onSort={sortBy} className="num" />
-                <th scope="col">Target URL</th>
+                <th scope="col">{isIndex ? 'Checked' : 'Target URL'}</th>
               </tr>
             </thead>
             <tbody>
@@ -490,9 +587,13 @@ export function ScanPage() {
                   </td>
                 </tr>
               )}
-              {rows?.rows.map((r) => (
-                <RowView key={`${r.sheet}-${r.row}`} r={r} />
-              ))}
+              {rows?.rows.map((r) =>
+                isIndex ? (
+                  <IndexRowView key={`${r.sheet}-${r.row}`} r={r} />
+                ) : (
+                  <RowView key={`${r.sheet}-${r.row}`} r={r} />
+                ),
+              )}
             </tbody>
           </table>
         </div>
@@ -636,6 +737,58 @@ function RowView({ r }: { r: ScanRowView }) {
           (r.targetUrl ?? '—')
         )}
       </td>
+    </tr>
+  );
+}
+
+/** A row of an Index Checker scan: the page, its index result with evidence, and when it was checked. */
+function IndexRowView({ r }: { r: ScanRowView }) {
+  const status = r.status && r.status in STATUS_INFO ? (r.status as LinkStatus) : null;
+  const waiting = !r.indexStatus && (status === 'PENDING' || status === 'CHECKING');
+  return (
+    <tr>
+      <td>{r.sheet}</td>
+      <td className="num">{r.row}</td>
+      <td className="cell-link">
+        {isSafeHref(r.url) ? (
+          <a href={r.url} target="_blank" rel="noopener noreferrer nofollow">
+            {r.url}
+          </a>
+        ) : (
+          <span className="cell-value">{r.value}</span>
+        )}
+        {r.duplicate && <span className="tag">repeat</span>}
+        {r.pageTitle && <span className="page-title-text">{r.pageTitle}</span>}
+      </td>
+      <td>
+        {!status ? (
+          <span className="skipped">
+            Skipped: {INVALID_REASON_TEXT[r.invalidReason as InvalidReason] ?? 'not a web address'}
+          </span>
+        ) : waiting || !r.indexStatus ? (
+          <StatusBadge status={status === 'CHECKING' ? 'CHECKING' : 'PENDING'} />
+        ) : (
+          <>
+            <IndexStatusBadge status={r.indexStatus} />
+            {r.indexReason && <span className="check-reason">{r.indexReason}</span>}
+            {r.retryAt && <span className="check-reason">Trying again automatically soon</span>}
+            {r.indexEvidence && r.indexEvidence.length > 0 && (
+              <details className="evidence">
+                <summary>Evidence</summary>
+                <ul>
+                  {r.indexEvidence.map((e, i) => (
+                    <li key={i} className={e.bad ? 'is-bad' : undefined}>
+                      {e.text}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
+        )}
+      </td>
+      <td className="num">{r.httpStatus ?? '—'}</td>
+      <td className="cell-date">{r.checkedAt ? formatDate(r.checkedAt) : '—'}</td>
     </tr>
   );
 }

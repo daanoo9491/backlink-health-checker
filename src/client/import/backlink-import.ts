@@ -28,6 +28,31 @@ const HEADER_ALIASES: Record<'backlinks' | OptionalColumn, string[]> = {
   da: ['da', 'domain authority'],
 };
 
+/**
+ * Index Checker sheets are often plain URL lists, so their link column may
+ * also be called URL, Page, Address or Link. (Link Health keeps "Backlinks",
+ * so a sheet with both a Backlinks and a URL column stays unambiguous.)
+ */
+const INDEX_LINK_ALIASES = [
+  'backlinks',
+  'backlink',
+  'url',
+  'urls',
+  'page',
+  'pages',
+  'page url',
+  'page urls',
+  'address',
+  'web address',
+  'link',
+  'links',
+];
+
+export interface ImportOptions {
+  /** 'index': accept the extra column names above. Defaults to Link Health. */
+  tool?: 'links' | 'index';
+}
+
 export function normalizeHeader(text: string): string {
   return cleanCellValue(text).replace(/:$/, '').replace(/\s+/g, ' ').toLowerCase();
 }
@@ -97,19 +122,20 @@ export class ImportError extends Error {
   }
 }
 
-function matchColumn(header: string): 'backlinks' | OptionalColumn | null {
+function matchColumn(header: string, opts: ImportOptions = {}): 'backlinks' | OptionalColumn | null {
   const h = normalizeHeader(header);
+  if (opts.tool === 'index' && INDEX_LINK_ALIASES.includes(h)) return 'backlinks';
   for (const [key, aliases] of Object.entries(HEADER_ALIASES)) {
     if (aliases.includes(h)) return key as 'backlinks' | OptionalColumn;
   }
   return null;
 }
 
-function findHeaderRow(sheet: Sheet): number | null {
+function findHeaderRow(sheet: Sheet, opts: ImportOptions): number | null {
   const rowNumbers = [...sheet.rows.keys()].sort((a, b) => a - b).slice(0, HEADER_SEARCH_ROWS);
   for (const r of rowNumbers) {
     for (const cell of sheet.rows.get(r)!.values()) {
-      if (matchColumn(cell.text) === 'backlinks') return r;
+      if (matchColumn(cell.text, opts) === 'backlinks') return r;
     }
   }
   return null;
@@ -126,7 +152,12 @@ function linkValue(cell: Cell | undefined): { value: string; check: ReturnType<t
   return { value: text, check: checkUrl(text) };
 }
 
-export function importBacklinks(workbook: Workbook, fileName: string, fileSize: number): ImportResult {
+export function importBacklinks(
+  workbook: Workbook,
+  fileName: string,
+  fileSize: number,
+  opts: ImportOptions = {},
+): ImportResult {
   const rows: ImportRow[] = [];
   const sheets: SheetSummary[] = [];
   const headers: string[] = [];
@@ -152,7 +183,7 @@ export function importBacklinks(workbook: Workbook, fileName: string, fileSize: 
       summary.status = 'empty';
       continue;
     }
-    const headerRow = findHeaderRow(sheet);
+    const headerRow = findHeaderRow(sheet, opts);
     if (headerRow === null) {
       summary.status = 'no-backlinks-column';
       continue;
@@ -169,7 +200,7 @@ export function importBacklinks(workbook: Workbook, fileName: string, fileSize: 
       for (let n = 2; used.has(name.toLowerCase()); n++) name = `${cleanCellValue(cell.text)} (${n})`;
       used.add(name.toLowerCase());
       names.set(col, name);
-      const role = matchColumn(cell.text);
+      const role = matchColumn(cell.text, opts);
       if (role && !roles.has(role)) roles.set(role, col);
     }
     const backlinkCol = roles.get('backlinks')!;

@@ -1467,3 +1467,60 @@ a:hover {
   line-height: 1.35;
   margin-top: 0.2rem;
 }
+
+/* ---------- Phase 8: Index Checker ---------- */
+.scan-head-side {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.tool-tag {
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: var(--harbor-tint);
+  color: var(--harbor);
+}
+.stat-cards-many {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 1px;
+  background: var(--line);
+}
+.stat-cards-many .stat,
+.stat-cards-many .stat:nth-child(n) {
+  border: 0;
+  background: var(--panel);
+}
+.stat-cards-many .stat-value {
+  font-size: 1.6rem;
+}
+.next-step p {
+  max-width: 46rem;
+}
+.evidence {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+}
+.evidence summary {
+  cursor: pointer;
+  color: var(--harbor);
+  font-weight: 600;
+}
+.evidence ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.2rem;
+  color: var(--ink-soft);
+}
+.evidence li.is-bad {
+  color: var(--dead);
+  font-weight: 600;
+}
+.cell-date {
+  white-space: nowrap;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}

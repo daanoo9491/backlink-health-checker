@@ -55,13 +55,9 @@ function decode(bytes: Uint8Array, charset: string | null): string {
   return new TextDecoder('utf-8').decode(bytes);
 }
 
-export async function readPage(res: Response, maxBytes = MAX_PAGE_BYTES): Promise<PageRead> {
-  const contentType = res.headers.get('Content-Type') ?? '';
-  if (!isHtmlType(contentType) || !res.body) {
-    await res.body?.cancel().catch(() => undefined);
-    return { isHtml: false, html: '', bytes: 0, truncated: false, contentType };
-  }
-
+/** Reads at most `maxBytes` of a body, cancelling the rest. Never throws. */
+async function readBytes(res: Response, maxBytes: number): Promise<{ all: Uint8Array; truncated: boolean }> {
+  if (!res.body) return { all: new Uint8Array(0), truncated: false };
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let bytes = 0;
@@ -90,13 +86,30 @@ export async function readPage(res: Response, maxBytes = MAX_PAGE_BYTES): Promis
   } finally {
     reader.cancel().catch(() => undefined);
   }
-
   const all = new Uint8Array(bytes);
   let at = 0;
   for (const c of chunks) {
     all.set(c, at);
     at += c.byteLength;
   }
+  return { all, truncated };
+}
+
+/** Any text body (e.g. robots.txt), size-capped, decoded as UTF-8 unless a charset is given. */
+export async function readText(res: Response, maxBytes: number): Promise<string> {
+  const { all } = await readBytes(res, maxBytes);
+  return decode(all, charsetFromContentType(res.headers.get('Content-Type') ?? ''));
+}
+
+export async function readPage(res: Response, maxBytes = MAX_PAGE_BYTES): Promise<PageRead> {
+  const contentType = res.headers.get('Content-Type') ?? '';
+  if (!isHtmlType(contentType) || !res.body) {
+    await res.body?.cancel().catch(() => undefined);
+    return { isHtml: false, html: '', bytes: 0, truncated: false, contentType };
+  }
+
+  const { all, truncated } = await readBytes(res, maxBytes);
+  const bytes = all.byteLength;
 
   // No Content-Type at all: only treat it as a page if it looks like HTML.
   const charset = charsetFromContentType(contentType) ?? charsetFromMeta(all);

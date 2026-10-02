@@ -5,6 +5,8 @@
  * for a whole batch of pages.
  */
 
+import { headSignals, type MetaTag } from '../indexing/signals';
+
 export interface PageFacts {
   title: string | null;
   h1: string | null;
@@ -12,6 +14,10 @@ export interface PageFacts {
   text: string;
   /** Length of the visible text in the scanned slice (capped at TEXT_COUNT_CAP). */
   textLength: number;
+  /** <meta name="robots|googlebot"> tags in <head>. */
+  robotsMeta: MetaTag[];
+  /** <link rel="canonical"> hrefs in <head>, as written. */
+  canonicals: string[];
 }
 
 /** How much HTML after <body> is turned into text. */
@@ -72,15 +78,28 @@ function firstElement(rest: string, tag: string): string | null {
 /** Removes blocks whose content is never visible text. */
 const INVISIBLE = /<(script|style|noscript|template|svg|iframe|object)\b[\s\S]*?<\/\1\s*>|<!--[\s\S]*?-->/gi;
 
+/** Without a <body> tag, this much of the page is treated as its <head>. */
+const HEAD_FALLBACK = 64 * 1024;
+
 export function extractFacts(html: string): PageFacts {
   const bodyAt = html.search(/<body[\s>]/i);
+  const head = bodyAt > 0 ? html.slice(0, bodyAt) : html.slice(0, HEAD_FALLBACK);
   // The page title lives in <head>; ignore <title> inside inline SVGs in the body.
-  const title = firstElement(bodyAt > 0 ? html.slice(0, bodyAt) : html, 'title');
+  const title = firstElement(head, 'title');
+  // Google only honours robots meta tags and canonicals in <head>.
+  const { robotsMeta, canonicals } = headSignals(head.replace(/<!--[\s\S]*?-->/g, ' '));
 
   const slice = html.slice(Math.max(0, bodyAt), Math.max(0, bodyAt) + BODY_SLICE);
   // …and a script cut off by the size cap runs to the end of the slice.
   const visible = slice.replace(INVISIBLE, ' ').replace(/<(script|style)\b[\s\S]*$/i, ' ');
   const h1 = firstElement(visible, 'h1');
   const text = squash(decodeEntities(visible.replace(/<[^>]*>/g, ' ')));
-  return { title, h1, text: text.slice(0, TEXT_SAMPLE), textLength: Math.min(text.length, TEXT_COUNT_CAP) };
+  return {
+    title,
+    h1,
+    text: text.slice(0, TEXT_SAMPLE),
+    textLength: Math.min(text.length, TEXT_COUNT_CAP),
+    robotsMeta,
+    canonicals,
+  };
 }

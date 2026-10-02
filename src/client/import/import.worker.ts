@@ -12,10 +12,10 @@ const ctx = self as unknown as {
 };
 
 ctx.onmessage = (e) => {
-  const { buffer, fileName, fileSize } = e.data;
+  const { buffer, fileName, fileSize, tool } = e.data;
   try {
     const workbook = readXlsx(new Uint8Array(buffer));
-    ctx.postMessage({ ok: true, result: importBacklinks(workbook, fileName, fileSize) });
+    ctx.postMessage({ ok: true, result: importBacklinks(workbook, fileName, fileSize, { tool }) });
   } catch (err) {
     const code = err instanceof XlsxError || err instanceof ImportError ? err.code : 'UNKNOWN';
     if (code === 'UNKNOWN') console.error(err);

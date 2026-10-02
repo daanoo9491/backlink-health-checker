@@ -13,6 +13,8 @@ import type { Env } from '../env';
 import { BudgetExhausted, SubrequestBudget } from './budget';
 import { checkLink, type CheckResult } from './check-link';
 import { createResolver } from './dns';
+import { evaluateIndex, type IndexResult } from '../indexing/evaluate';
+import { fetchRobots, originOf, robotsVerdict, type RobotsFile } from '../indexing/robots-fetch';
 
 export const BATCH_SIZE = 8;
 /** Free plan allows 50; keep a margin. */
@@ -76,7 +78,8 @@ export async function runCheckBatch(
   db: Db,
   env: Env,
   scanId: string,
-  opts: { ownHost: string; batchSize?: number },
+  /** `index`: also judge indexability (Index Checker scans). */
+  opts: { ownHost: string; batchSize?: number; index?: boolean },
 ): Promise<BatchOutcome> {
   const now = Math.floor(Date.now() / 1000);
 
@@ -130,6 +133,7 @@ export async function runCheckBatch(
   }
 
   const results = new Map<number, CheckResult>();
+  const index = new Map<number, IndexResult>();
   {
     const budget = new SubrequestBudget(SUBREQUEST_LIMIT);
     const deps = {
@@ -149,6 +153,8 @@ export async function runCheckBatch(
         // Out of requests for this invocation: leave it for the next batch.
       }
     });
+
+    if (opts.index) await judgeIndexing(db, results, index, deps);
   }
 
   // One statement saves every result; unfinished links go back to waiting,
@@ -169,6 +175,9 @@ export async function runCheckBatch(
       error: r.error,
       reason: r.reason,
       title: r.pageTitle?.slice(0, 300) ?? null,
+      idx: index.get(c.url_index)?.status ?? null,
+      idx_reason: index.get(c.url_index)?.reason.slice(0, 500) ?? null,
+      idx_evidence: index.get(c.url_index)?.evidence ?? null,
       counted: 1,
       retry,
     };
@@ -186,13 +195,17 @@ export async function runCheckBatch(
          error_message = j.error,
          check_reason = j.reason,
          page_title = j.title,
+         index_status = j.idx,
+         index_reason = j.idx_reason,
+         index_evidence = j.idx_evidence,
          attempts = u.attempts + j.counted,
          checked_at = CASE WHEN j.counted = 1 THEN $3::timestamptz ELSE u.checked_at END,
          claimed_at = NULL,
          retry_at = j.retry
        FROM jsonb_to_recordset($2::jsonb) AS j(
          i int, status text, http int, final text, redirected boolean, ms int,
-         error text, reason text, title text, counted int, retry bigint)
+         error text, reason text, title text, idx text, idx_reason text, idx_evidence jsonb,
+         counted int, retry bigint)
        WHERE u.scan_id = $1 AND u.url_index = j.i`,
       [scanId, JSON.stringify(payload), checkedAt],
     );
@@ -209,11 +222,16 @@ export async function runCheckBatch(
          COUNT(*) FILTER (WHERE status = 'REDIRECTED')::int AS redirected,
          COUNT(*) FILTER (WHERE status = 'BLOCKED')::int AS blocked,
          COUNT(*) FILTER (WHERE status IN ('RATE_LIMITED', 'SERVER_ERROR', 'TIMEOUT', 'NETWORK_ERROR'))::int AS errors,
-         COUNT(*) FILTER (WHERE status IN ('PENDING', 'CHECKING') OR retry_at IS NOT NULL)::int AS remaining
+         COUNT(*) FILTER (WHERE status IN ('PENDING', 'CHECKING') OR retry_at IS NOT NULL)::int AS remaining,
+         COUNT(*) FILTER (WHERE index_status = 'INDEXABLE')::int AS indexable,
+         COUNT(*) FILTER (WHERE index_status IN ('NOINDEX', 'ROBOTS_BLOCKED', 'CANONICAL_ELSEWHERE', 'NOT_REACHABLE')
+                           AND retry_at IS NULL)::int AS idx_issues,
+         COUNT(*) FILTER (WHERE index_status = 'UNKNOWN' AND retry_at IS NULL)::int AS idx_unknown
        FROM unique_urls WHERE scan_id = $1)
      UPDATE scans s SET
        checked_count = c.checked, active_count = c.active, dead_count = c.dead, soft_404_count = c.soft404,
        redirected_count = c.redirected, blocked_count = c.blocked, error_count = c.errors,
+       indexable_count = c.indexable, index_issue_count = c.idx_issues, index_unknown_count = c.idx_unknown,
        started_at = COALESCE(s.started_at, $2::timestamptz),
        heartbeat_at = now(),
        -- A pause pressed while this batch ran wins; otherwise running until nothing is left.
@@ -230,4 +248,101 @@ export async function runCheckBatch(
     scan: row ?? null,
     cutShort: results.size < claimed.length,
   };
+}
+
+const ROBOTS_FRESH = `CASE WHEN outcome = 'unknown' THEN interval '30 minutes' ELSE interval '24 hours' END`;
+
+/**
+ * Index Checker: reads robots.txt for each site in the batch (from the cache
+ * when fresh, else fetched and cached), then judges every checked link.
+ * Two queries at most: one cache read, one cache write.
+ */
+async function judgeIndexing(
+  db: Db,
+  results: Map<number, CheckResult>,
+  index: Map<number, IndexResult>,
+  deps: Parameters<typeof fetchRobots>[1],
+) {
+  const urlOf = (r: CheckResult) => (r.status === 'ACTIVE' && r.finalUrl ? new URL(r.finalUrl) : null);
+  const origins = [...new Set([...results.values()].flatMap((r) => (urlOf(r) ? [originOf(urlOf(r)!)] : [])))];
+
+  const files = new Map<string, RobotsFile>();
+  if (origins.length) {
+    const cached = await db.query<{
+      origin: string;
+      outcome: RobotsFile['outcome'];
+      http_status: number | null;
+      body: string | null;
+      why: string | null;
+    }>(
+      `SELECT origin, outcome, http_status, body, why FROM robots_cache
+       WHERE origin = ANY($1::text[]) AND fetched_at > now() - ${ROBOTS_FRESH}`,
+      [origins],
+    );
+    for (const c of cached) {
+      files.set(
+        c.origin,
+        c.outcome === 'file'
+          ? { outcome: 'file', httpStatus: c.http_status ?? 200, body: c.body ?? '' }
+          : c.outcome === 'no-file'
+            ? { outcome: 'no-file', httpStatus: c.http_status }
+            : { outcome: 'unknown', why: c.why ?? 'unknown' },
+      );
+    }
+  }
+
+  const fresh = new Map<string, RobotsFile>();
+  const deferred = new Set<string>();
+  for (const origin of origins.filter((o) => !files.has(o))) {
+    try {
+      fresh.set(origin, await fetchRobots(origin, deps));
+    } catch (e) {
+      if (!(e instanceof BudgetExhausted)) throw e;
+      deferred.add(origin); // out of requests: these links wait for the next batch
+    }
+  }
+  if (fresh.size) {
+    await db.query(
+      `INSERT INTO robots_cache (origin, outcome, http_status, body, why, fetched_at)
+       SELECT j.origin, j.outcome, j.http, j.body, j.why, now()
+       FROM jsonb_to_recordset($1::jsonb) AS j(origin text, outcome text, http int, body text, why text)
+       ON CONFLICT (origin) DO UPDATE SET outcome = excluded.outcome, http_status = excluded.http_status,
+         body = excluded.body, why = excluded.why, fetched_at = excluded.fetched_at`,
+      [
+        JSON.stringify(
+          [...fresh].map(([origin, f]) => ({
+            origin,
+            outcome: f.outcome,
+            http: f.outcome === 'unknown' ? null : f.httpStatus,
+            body: f.outcome === 'file' ? f.body : null,
+            why: f.outcome === 'unknown' ? f.why : null,
+          })),
+        ),
+      ],
+    );
+  }
+  for (const [o, f] of fresh) files.set(o, f);
+
+  for (const [i, r] of results) {
+    const u = urlOf(r);
+    if (u && deferred.has(originOf(u))) {
+      results.delete(i);
+      continue;
+    }
+    const file = u ? files.get(originOf(u)) : undefined;
+    index.set(
+      i,
+      evaluateIndex({
+        link: {
+          status: r.status,
+          reason: r.reason,
+          retryable: r.retryable,
+          httpStatus: r.httpStatus,
+          finalUrl: r.finalUrl,
+        },
+        page: r.signals,
+        robots: u && file ? robotsVerdict(file, u) : null,
+      }),
+    );
+  }
 }

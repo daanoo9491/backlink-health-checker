@@ -39,16 +39,16 @@ export function extractValues(text: string): string[] {
 
 export class TooManyLinksError extends Error {}
 
-export function importPastedText(text: string, name: string): ImportResult {
+export function importPastedText(text: string, name: string, tool: 'links' | 'index' = 'links'): ImportResult {
   const values = extractValues(text);
   if (values.length === 0) throw new ImportError('NO_VALID_URLS');
   if (values.length > SCAN_LIMITS.maxRows) throw new TooManyLinksError();
 
   const rows = new Map<number, Map<number, Cell>>();
-  rows.set(1, new Map([[0, { text: 'Backlinks' }]]));
+  rows.set(1, new Map([[0, { text: tool === 'index' ? 'URL' : 'Backlinks' }]]));
   values.forEach((v, i) => rows.set(i + 2, new Map([[0, { text: v }]])));
   const workbook: Workbook = { sheets: [{ name: PASTED_SHEET, hidden: false, rows }] };
 
   const bytes = new TextEncoder().encode(text).length;
-  return { ...importBacklinks(workbook, name, bytes), worksheets: 1 };
+  return { ...importBacklinks(workbook, name, bytes, { tool }), worksheets: 1 };
 }

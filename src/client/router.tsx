@@ -19,10 +19,11 @@ export const router = createBrowserRouter([
         element: <AppLayout />,
         children: [
           { index: true, element: <DashboardPage /> },
-          { path: 'scans/new', element: <NewScanPage /> },
+          { path: 'scans/new', element: <NewScanPage key="links" /> },
           { path: 'scans', element: <ScanHistoryPage /> },
           { path: 'scans/:id', element: <ScanPage /> },
           { path: 'index-checker', element: <IndexCheckerPage /> },
+          { path: 'index-checker/new', element: <NewScanPage key="index" tool="index" /> },
           { path: 'settings', element: <SettingsPage /> },
           { path: '*', element: <NotFoundPage /> },
         ],

@@ -13,6 +13,8 @@ import {
   ROW_FILTER_GROUPS,
   ROW_SORTS,
   type CreateScanResponse,
+  type IndexCheckFromScanResponse,
+  type ScanTool,
   type RowFilterGroup,
   type RowSort,
   type RowFilters,
@@ -55,15 +57,18 @@ scanRoutes.onError((err, c) => {
   throw err;
 });
 
-scanRoutes.get('/', async (c) => c.json<ScanListResponse>({ scans: await listScans(c.get('db'), c.get('user')!.id) }));
+scanRoutes.get('/', async (c) => {
+  const tool: ScanTool = c.req.query('tool') === 'index' ? 'index' : 'links';
+  return c.json<ScanListResponse>({ scans: await listScans(c.get('db'), c.get('user')!.id, tool) });
+});
 
 scanRoutes.post('/', async (c) => {
   const input = parseCreateScan(await readJson(c.req.raw));
   const id = crypto.randomUUID();
   await c.get('db').query(
     `INSERT INTO scans (id, user_id, file_name, file_size, status, worksheets, sheets_json, headers_json,
-                        expected_rows, expected_urls, blank_rows)
-     VALUES ($1, $2, $3, $4, 'uploading', $5, $6::jsonb, $7::jsonb, $8, $9, $10)`,
+                        expected_rows, expected_urls, blank_rows, tool)
+     VALUES ($1, $2, $3, $4, 'uploading', $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11)`,
     [
       id,
       c.get('user')!.id,
@@ -75,6 +80,7 @@ scanRoutes.post('/', async (c) => {
       input.totalRows,
       input.uniqueUrls,
       input.blankRows,
+      input.tool ?? 'links',
     ],
   );
   return c.json<CreateScanResponse>({ id }, 201);
@@ -169,6 +175,47 @@ scanRoutes.post('/:id/start', async (c) => {
   return c.json(toSummary(updated ?? scan));
 });
 
+/**
+ * Index Checker on a Link Health scan: copies its links and rows into a new
+ * index check (the original scan is left as it is) and starts checking.
+ */
+scanRoutes.post('/:id/index-check', async (c) => {
+  const db = c.get('db');
+  const source = await getScan(db, c.get('user')!.id, c.req.param('id'));
+  if (!source) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was deleted.');
+  if (source.status === 'uploading') {
+    return apiError(c, 409, 'NOT_READY', 'This upload didn’t finish. Delete it and upload the file again.');
+  }
+  const id = crypto.randomUUID();
+  await db.transaction(async (tx) => {
+    await tx.query(
+      `INSERT INTO scans (id, user_id, tool, source_scan_id, file_name, file_size, status, worksheets, sheets_json,
+                          headers_json, expected_rows, expected_urls, total_rows, valid_urls, invalid_rows,
+                          blank_rows, unique_urls, duplicate_rows)
+       SELECT $1, user_id, 'index', id, file_name, file_size, 'ready', worksheets, sheets_json,
+              headers_json, expected_rows, expected_urls, total_rows, valid_urls, invalid_rows,
+              blank_rows, unique_urls, duplicate_rows
+       FROM scans WHERE id = $2`,
+      [id, source.id],
+    );
+    await tx.query(
+      `INSERT INTO unique_urls (scan_id, url_index, url)
+       SELECT $1, url_index, url FROM unique_urls WHERE scan_id = $2`,
+      [id, source.id],
+    );
+    await tx.query(
+      `INSERT INTO scan_rows (scan_id, sheet_name, row_number, original_value, url_index, is_duplicate,
+                             invalid_reason, target_url, anchor_text, cells_json)
+       SELECT $1, sheet_name, row_number, original_value, url_index, is_duplicate,
+              invalid_reason, target_url, anchor_text, cells_json
+       FROM scan_rows WHERE scan_id = $2 ORDER BY seq`,
+      [id, source.id],
+    );
+  });
+  await startChecking(db, c.env.SCAN_QUEUE, id, new URL(c.req.url).hostname);
+  return c.json<IndexCheckFromScanResponse>({ id }, 201);
+});
+
 /** Pauses background checking; Start resumes from where it stopped. */
 scanRoutes.post('/:id/pause', async (c) => {
   const db = c.get('db');
@@ -196,6 +243,7 @@ scanRoutes.get('/:id/rows', async (c) => {
     pageSize,
     readFilters(c.req.query()),
     sheetNames,
+    scan.tool,
   );
   return c.json<ScanRowsResponse>({ rows, total, page, pageSize, facets });
 });

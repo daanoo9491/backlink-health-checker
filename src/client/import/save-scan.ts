@@ -1,4 +1,10 @@
-import { SCAN_LIMITS, type CreateScanRequest, type CreateScanResponse, type ScanRowInput } from '../../shared/api';
+import {
+  SCAN_LIMITS,
+  type CreateScanRequest,
+  type CreateScanResponse,
+  type ScanRowInput,
+  type ScanTool,
+} from '../../shared/api';
 import { api, RequestError } from '../api/client';
 import type { ImportResult } from './backlink-import';
 
@@ -32,9 +38,14 @@ export function tooBigForOneScan(result: ImportResult): boolean {
  */
 export async function saveScan(
   result: ImportResult,
-  opts: { onProgress: (p: SaveProgress) => void; onCreated: (id: string) => void; resumeId?: string },
+  opts: {
+    onProgress: (p: SaveProgress) => void;
+    onCreated: (id: string) => void;
+    resumeId?: string;
+    tool?: ScanTool;
+  },
 ): Promise<string> {
-  const { onProgress, onCreated, resumeId } = opts;
+  const { onProgress, onCreated, resumeId, tool = 'links' } = opts;
   const urlChunks: string[][] = [];
   for (let i = 0; i < result.uniqueUrls.length; i += SCAN_LIMITS.urlsPerRequest) {
     urlChunks.push(result.uniqueUrls.slice(i, i + SCAN_LIMITS.urlsPerRequest));
@@ -62,6 +73,7 @@ export async function saveScan(
   let id = resumeId;
   if (!id) {
     const meta: CreateScanRequest = {
+      tool,
       fileName: result.fileName,
       fileSize: result.fileSize,
       worksheets: result.worksheets,
