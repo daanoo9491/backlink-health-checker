@@ -13,6 +13,8 @@ import type { Env } from '../env';
 import { BudgetExhausted, SubrequestBudget } from './budget';
 import { checkLink, type CheckResult } from './check-link';
 import { createResolver } from './dns';
+import type { IndexSource } from '../../shared/index-status';
+import { searchConsoleFor } from '../gsc/service';
 import { evaluateIndex, type IndexResult } from '../indexing/evaluate';
 import { fetchRobots, originOf, robotsVerdict, type RobotsFile } from '../indexing/robots-fetch';
 
@@ -133,7 +135,7 @@ export async function runCheckBatch(
   }
 
   const results = new Map<number, CheckResult>();
-  const index = new Map<number, IndexResult>();
+  const index = new Map<number, JudgedIndex>();
   {
     const budget = new SubrequestBudget(SUBREQUEST_LIMIT);
     const deps = {
@@ -154,7 +156,18 @@ export async function runCheckBatch(
       }
     });
 
-    if (opts.index) await judgeIndexing(db, results, index, deps);
+    if (opts.index) {
+      // Search Console is asked once per link: not for a failure that will be retried anyway.
+      const urls = new Map(
+        claimed
+          .filter((c) => {
+            const r = results.get(c.url_index);
+            return r && !(r.retryable && c.attempts + 1 < MAX_ATTEMPTS);
+          })
+          .map((c) => [c.url_index, c.url]),
+      );
+      await judgeIndexing(db, env, results, index, deps, urls);
+    }
   }
 
   // One statement saves every result; unfinished links go back to waiting,
@@ -178,6 +191,7 @@ export async function runCheckBatch(
       idx: index.get(c.url_index)?.status ?? null,
       idx_reason: index.get(c.url_index)?.reason.slice(0, 500) ?? null,
       idx_evidence: index.get(c.url_index)?.evidence ?? null,
+      idx_source: index.get(c.url_index)?.source ?? null,
       counted: 1,
       retry,
     };
@@ -198,13 +212,14 @@ export async function runCheckBatch(
          index_status = j.idx,
          index_reason = j.idx_reason,
          index_evidence = j.idx_evidence,
+         index_source = j.idx_source,
          attempts = u.attempts + j.counted,
          checked_at = CASE WHEN j.counted = 1 THEN $3::timestamptz ELSE u.checked_at END,
          claimed_at = NULL,
          retry_at = j.retry
        FROM jsonb_to_recordset($2::jsonb) AS j(
          i int, status text, http int, final text, redirected boolean, ms int,
-         error text, reason text, title text, idx text, idx_reason text, idx_evidence jsonb,
+         error text, reason text, title text, idx text, idx_reason text, idx_evidence jsonb, idx_source text,
          counted int, retry bigint)
        WHERE u.scan_id = $1 AND u.url_index = j.i`,
       [scanId, JSON.stringify(payload), checkedAt],
@@ -223,8 +238,8 @@ export async function runCheckBatch(
          COUNT(*) FILTER (WHERE status = 'BLOCKED')::int AS blocked,
          COUNT(*) FILTER (WHERE status IN ('RATE_LIMITED', 'SERVER_ERROR', 'TIMEOUT', 'NETWORK_ERROR'))::int AS errors,
          COUNT(*) FILTER (WHERE status IN ('PENDING', 'CHECKING') OR retry_at IS NOT NULL)::int AS remaining,
-         COUNT(*) FILTER (WHERE index_status = 'INDEXABLE')::int AS indexable,
-         COUNT(*) FILTER (WHERE index_status IN ('NOINDEX', 'ROBOTS_BLOCKED', 'CANONICAL_ELSEWHERE', 'NOT_REACHABLE')
+         COUNT(*) FILTER (WHERE index_status IN ('INDEXABLE', 'INDEXED'))::int AS indexable,
+         COUNT(*) FILTER (WHERE index_status IN ('NOT_INDEXED', 'NOINDEX', 'ROBOTS_BLOCKED', 'CANONICAL_ELSEWHERE', 'NOT_REACHABLE')
                            AND retry_at IS NULL)::int AS idx_issues,
          COUNT(*) FILTER (WHERE index_status = 'UNKNOWN' AND retry_at IS NULL)::int AS idx_unknown
        FROM unique_urls WHERE scan_id = $1)
@@ -257,11 +272,15 @@ const ROBOTS_FRESH = `CASE WHEN outcome = 'unknown' THEN interval '30 minutes' E
  * when fresh, else fetched and cached), then judges every checked link.
  * Two queries at most: one cache read, one cache write.
  */
+type JudgedIndex = IndexResult & { source: IndexSource };
+
 async function judgeIndexing(
   db: Db,
+  env: Env,
   results: Map<number, CheckResult>,
-  index: Map<number, IndexResult>,
+  index: Map<number, JudgedIndex>,
   deps: Parameters<typeof fetchRobots>[1],
+  urls: Map<number, string>,
 ) {
   const urlOf = (r: CheckResult) => (r.status === 'ACTIVE' && r.finalUrl ? new URL(r.finalUrl) : null);
   const origins = [...new Set([...results.values()].flatMap((r) => (urlOf(r) ? [originOf(urlOf(r)!)] : [])))];
@@ -330,9 +349,8 @@ async function judgeIndexing(
       continue;
     }
     const file = u ? files.get(originOf(u)) : undefined;
-    index.set(
-      i,
-      evaluateIndex({
+    index.set(i, {
+      ...evaluateIndex({
         link: {
           status: r.status,
           reason: r.reason,
@@ -343,6 +361,40 @@ async function judgeIndexing(
         page: r.signals,
         robots: u && file ? robotsVerdict(file, u) : null,
       }),
-    );
+      source: 'signals',
+    });
+  }
+
+  // Your own sites: Google Search Console's answer wins over every signal.
+  // The crawler's evidence stays underneath, so conflicts are visible.
+  const gsc = await searchConsoleFor(
+    db,
+    env,
+    [...urls].filter(([key]) => results.has(key)).map(([key, url]) => ({ key, url })),
+    deps.budget,
+  );
+  for (const [key, o] of gsc) {
+    const signals = index.get(key);
+    if (o.kind === 'deferred') {
+      results.delete(key); // out of requests: checked again in the next batch
+      index.delete(key);
+    } else if (o.kind === 'answer') {
+      index.set(key, {
+        ...o.result,
+        evidence: [
+          ...o.result.evidence,
+          ...(signals ? [{ signal: 'page' as const, text: 'Our own check:' }, ...signals.evidence] : []),
+        ],
+        source: 'search_console',
+      });
+    } else if (signals) {
+      index.set(key, {
+        ...signals,
+        evidence: [
+          { signal: 'gsc', text: `Search Console unavailable (${o.why}), so this shows what our crawler saw` },
+          ...signals.evidence,
+        ],
+      });
+    }
   }
 }

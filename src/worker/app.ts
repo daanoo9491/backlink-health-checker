@@ -11,6 +11,7 @@ import { healthRoutes } from './routes/health';
 import { authRoutes } from './routes/auth';
 import { dashboardRoutes } from './routes/dashboard';
 import { scanRoutes } from './routes/scans';
+import { searchConsoleRoutes } from './routes/search-console';
 
 /**
  * The API application. Built as a factory so tests can call app.request()
@@ -28,6 +29,7 @@ export function createApp(opts: { db?: DbFactory } = {}) {
   app.route('/auth', authRoutes);
   app.route('/dashboard', dashboardRoutes);
   app.route('/scans', scanRoutes);
+  app.route('/search-console', searchConsoleRoutes);
 
   app.notFound((c) => apiError(c, 404, 'NOT_FOUND', 'This API route does not exist.'));
 

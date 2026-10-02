@@ -20,6 +20,12 @@ export interface Env {
   AUTH_PASSWORD?: string;
   SESSION_SECRET?: string;
 
+  /**
+   * Index Checker, Search Console (optional): the Google service-account key
+   * file (JSON), pasted whole. Without it, index checks use signals only.
+   */
+  GSC_SERVICE_ACCOUNT?: string;
+
   /** Development only ("true" with APP_ENV=development): skip the DNS safety check. */
   CHECKER_SKIP_DNS?: string;
 }

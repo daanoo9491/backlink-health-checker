@@ -1524,3 +1524,54 @@ a:hover {
   color: var(--ink-soft);
   font-size: 0.9rem;
 }
+
+/* ---------- Phase 9: Search Console ---------- */
+.source-tag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: var(--harbor-tint);
+  color: var(--harbor);
+  vertical-align: middle;
+}
+.gsc-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+  width: 100%;
+}
+.gsc-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--line);
+}
+.gsc-list li:first-child {
+  border-top: 0;
+}
+.gsc-site {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.gsc-meta {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+.copy-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.copy-row code {
+  overflow-wrap: anywhere;
+  background: var(--harbor-tint);
+  padding: 0.2rem 0.45rem;
+  border-radius: var(--radius-s);
+}

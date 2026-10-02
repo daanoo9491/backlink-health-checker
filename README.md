@@ -9,7 +9,9 @@ An internal tool for our Marketing team, with two tools behind one sign-in:
 
 The app runs on Cloudflare; data is stored in Supabase Postgres.
 
-> **Current status: Phase 8 (Index Checker, part 1).** Paste or upload URLs, or run it on a Link Health scan. For each page it reads robots.txt (as Googlebot), the meta robots tag, the X-Robots-Tag header and the canonical, and reports **Indexable**, **Blocked from indexing**, **Crawling blocked**, **Canonical points elsewhere**, **Page not reachable** or **Unknown**, with the evidence. It never says “Not indexed”: only Search Console can (Phase 9).
+> **Current status: Phase 9 (Index Checker, part 2: Search Console).** Pages on your own sites connected to Google Search Console get Google's own answer, **Indexed** or **Not indexed** with Google's reason (e.g. “Crawled - currently not indexed”), via the URL Inspection API. Everyone else's pages keep the signal-based results. See _Search Console setup_ below.
+>
+> **Phase 8 (Index Checker, part 1).** Paste or upload URLs, or run it on a Link Health scan. For each page it reads robots.txt (as Googlebot), the meta robots tag, the X-Robots-Tag header and the canonical, and reports **Indexable**, **Blocked from indexing**, **Crawling blocked**, **Canonical points elsewhere**, **Page not reachable** or **Unknown**, with the evidence. It never says “Not indexed”: only Search Console can (Phase 9).
 >
 > **Phase 7 (page reader + soft 404).** Pages that answer “200 OK” but are really gone (a “Page not found” title or heading, a not-found message on a short page, or a removed page that now lands on a home page or an error address) are reported as **Soft 404**, with the reason. Bot-check pages count as Blocked. Each backlink page’s title is saved, shown and searchable.
 >
@@ -176,6 +178,30 @@ It reads D1 through your `npx wrangler login`, matches users by email (scans att
 **Cron (every 10 minutes):** restarts any scan whose background chain went quiet for 10 minutes (e.g. a message that failed all its retries), and writes one row to `heartbeat`. Supabase pauses free projects after about a week without activity, so this also keeps the project awake.
 
 **Local development:** `npm run dev` connects to the `localConnectionString` in `wrangler.jsonc` (`postgres://postgres:postgres@localhost:5432/postgres`). Run a Postgres there (for example `supabase start`, or Docker `postgres:16`), then `DATABASE_URL=… npm run db:migrate`. Queues run locally inside `npm run dev` with no setup.
+
+### Search Console setup (optional, Phase 9)
+
+Lets the Index Checker show Google's own answer for **your** sites. Without it, index checks use signals only.
+
+1. **Google Cloud project:** at [console.cloud.google.com](https://console.cloud.google.com), create a project (e.g. “LinkLedger SEO”).
+2. **Turn on the API:** APIs & Services → Library → **Google Search Console API** → Enable.
+3. **Service account:** IAM & Admin → Service Accounts → **Create service account** (name it e.g. `linkledger`); no roles are needed → Done.
+4. **Key:** open the service account → Keys → Add key → Create new key → **JSON**. A `.json` file downloads. Treat it like a password.
+5. **Give it access in Search Console:** for each site (e.g. `lanop.co.uk`): Search Console → Settings → Users and permissions → **Add user** → paste the service account's email (it ends in `iam.gserviceaccount.com`) → **Full** permission.
+6. **Store the key as a secret** (PowerShell, in the project folder):
+
+   ```powershell
+   Get-Content "C:\path\to\key.json" -Raw | npx wrangler secret put GSC_SERVICE_ACCOUNT --env staging
+   Get-Content "C:\path\to\key.json" -Raw | npx wrangler secret put GSC_SERVICE_ACCOUNT
+   ```
+
+   (first line staging, second production). Then delete the downloaded file or keep it somewhere safe; never commit it.
+
+7. **Check:** Settings → Google Search Console lists your sites and today's usage.
+
+Google allows 2,000 URL inspections per site per day; the app stops at 1,900 (leaving room for Search Console's own website) and falls back to signals for the rest of that day. The key is used only to sign in to Google with read-only access; the app never shows it.
+
+If your Google Workspace blocks service-account keys (“key creation is disabled”), an admin must allow it for this project.
 
 ## GitHub setup
 

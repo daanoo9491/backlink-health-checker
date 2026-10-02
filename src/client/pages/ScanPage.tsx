@@ -14,7 +14,13 @@ import {
   type ScanSummary,
 } from '../../shared/api';
 import { TOOLS } from '../../shared/brand';
-import { INDEX_SORT_ORDER, INDEX_STATUSES, INDEX_STATUS_INFO, type IndexStatus } from '../../shared/index-status';
+import {
+  INDEX_SORT_ORDER,
+  INDEX_STATUSES,
+  INDEX_STATUS_INFO,
+  SEARCH_CONSOLE_STATUSES,
+  type IndexStatus,
+} from '../../shared/index-status';
 import { ISSUE_CATEGORIES, REVIEW_STATUSES } from '../../shared/issues';
 import { STATUS_INFO, type LinkStatus } from '../../shared/status';
 import { INVALID_REASON_TEXT, type InvalidReason } from '../../shared/url';
@@ -265,7 +271,8 @@ export function ScanPage() {
     { label: 'Waiting', value: waiting, group: 'waiting' },
   ];
   const indexCards: { label: string; value: number; tone?: string; group: RowFilterGroup }[] = [
-    ...INDEX_STATUSES.map((s) => ({
+    // Indexed / Not indexed come only from Search Console: shown when it answered.
+    ...INDEX_STATUSES.filter((s) => !SEARCH_CONSOLE_STATUSES.includes(s) || ixCount(s) > 0).map((s) => ({
       label: INDEX_STATUS_INFO[s].label,
       value: ixCount(s),
       tone: ixCount(s) ? INDEX_STATUS_INFO[s].tone : undefined, // a zero isn't a warning
@@ -335,8 +342,9 @@ export function ScanPage() {
 
       {isIndex && (
         <p className="notice notice-info">
-          These results show whether Google <strong>can</strong> index each page, from what any crawler can see. They
-          never say a page is “Not indexed”: only Google Search Console can confirm that.
+          For your own sites connected to Google Search Console, results are Google’s own answer:{' '}
+          <strong>Indexed</strong> or <strong>Not indexed</strong>. For other sites they show whether Google{' '}
+          <strong>can</strong> index each page, from what any crawler can see, and never say “Not indexed”.
           {scan.sourceScanId && (
             <>
               {' '}
@@ -770,6 +778,7 @@ function IndexRowView({ r }: { r: ScanRowView }) {
         ) : (
           <>
             <IndexStatusBadge status={r.indexStatus} />
+            {r.indexSource === 'search_console' && <span className="source-tag">Search Console</span>}
             {r.indexReason && <span className="check-reason">{r.indexReason}</span>}
             {r.retryAt && <span className="check-reason">Trying again automatically soon</span>}
             {r.indexEvidence && r.indexEvidence.length > 0 && (

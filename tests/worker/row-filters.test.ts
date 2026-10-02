@@ -95,7 +95,9 @@ describe('row filters', () => {
       unreachable: 0,
       site_error: 0,
       refused: 1,
-      indexable: 0, // index results exist only in Index Checker scans
+      indexed: 0, // index results exist only in Index Checker scans
+      not_indexed: 0,
+      indexable: 0,
       noindex: 0,
       robots_blocked: 0,
       canonical_elsewhere: 0,

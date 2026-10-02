@@ -1,12 +1,16 @@
 /**
- * Index Checker results for other people's pages ("Route B": signals any
- * crawler can read). None of these claims anything about Google's index:
- * only Google Search Console can say "Indexed" or "Not indexed" (Phase 9),
- * so those words never appear here.
+ * Index Checker results.
+ *
+ * Route A (your own sites, Phase 9): Google Search Console's own record, the
+ * only source allowed to say "Indexed" or "Not indexed".
+ * Route B (everyone else's sites): signals any crawler can read. None of
+ * these claims anything about Google's index, so those words never appear.
  */
 import type { StatusTone } from './status';
 
 export const INDEX_STATUSES = [
+  'INDEXED',
+  'NOT_INDEXED',
   'INDEXABLE',
   'NOINDEX',
   'ROBOTS_BLOCKED',
@@ -15,6 +19,10 @@ export const INDEX_STATUSES = [
   'UNKNOWN',
 ] as const;
 export type IndexStatus = (typeof INDEX_STATUSES)[number];
+
+/** Only these come from our own crawler's signals; the other two only from Search Console. */
+export const SIGNAL_STATUSES = INDEX_STATUSES.filter((s) => s !== 'INDEXED' && s !== 'NOT_INDEXED');
+export const SEARCH_CONSOLE_STATUSES: readonly IndexStatus[] = ['INDEXED', 'NOT_INDEXED'];
 
 export interface IndexStatusInfo {
   label: string;
@@ -26,6 +34,19 @@ export interface IndexStatusInfo {
 }
 
 export const INDEX_STATUS_INFO: Record<IndexStatus, IndexStatusInfo> = {
+  INDEXED: {
+    label: 'Indexed',
+    tone: 'active',
+    description: 'Google Search Console confirms the page is on Google.',
+    advice: 'Nothing to fix.',
+  },
+  NOT_INDEXED: {
+    label: 'Not indexed',
+    tone: 'dead',
+    description: 'Google Search Console confirms the page is not on Google, and says why.',
+    advice:
+      'Google says this page isn’t on Google; the reason is shown on each row. Fix the cause, then ask Google to index it again from Search Console.',
+  },
   INDEXABLE: {
     label: 'Indexable',
     tone: 'active',
@@ -70,16 +91,21 @@ export const INDEX_STATUS_INFO: Record<IndexStatus, IndexStatusInfo> = {
 /** Sorting by index result, ascending: most urgent first. */
 export const INDEX_SORT_ORDER: readonly IndexStatus[] = [
   'NOT_REACHABLE',
+  'NOT_INDEXED',
   'NOINDEX',
   'ROBOTS_BLOCKED',
   'CANONICAL_ELSEWHERE',
   'UNKNOWN',
   'INDEXABLE',
+  'INDEXED',
 ];
+
+/** Where a result came from. */
+export type IndexSource = 'search_console' | 'signals';
 
 /** One line of evidence behind an index result. `bad` lines explain a problem. */
 export interface IndexEvidence {
-  signal: 'page' | 'robots' | 'meta' | 'header' | 'canonical';
+  signal: 'gsc' | 'page' | 'robots' | 'meta' | 'header' | 'canonical';
   text: string;
   bad?: boolean;
 }

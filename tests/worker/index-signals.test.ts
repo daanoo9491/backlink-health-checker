@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INDEX_STATUSES, INDEX_STATUS_INFO } from '../../src/shared/index-status';
+import { INDEX_STATUS_INFO, SIGNAL_STATUSES } from '../../src/shared/index-status';
 import { LINK_STATUSES } from '../../src/shared/status';
 import { extractFacts } from '../../src/worker/checker/page-facts';
 import {
@@ -190,7 +190,9 @@ describe('evaluateIndex: each result', () => {
 
 describe('Route B never says “Not indexed”', () => {
   it('in any label, description or advice', () => {
-    for (const s of INDEX_STATUSES) {
+    expect(SIGNAL_STATUSES).not.toContain('INDEXED');
+    expect(SIGNAL_STATUSES).not.toContain('NOT_INDEXED');
+    for (const s of SIGNAL_STATUSES) {
       const info = INDEX_STATUS_INFO[s];
       expect(`${info.label} ${info.description} ${info.advice}`).not.toMatch(/not indexed/i);
     }
@@ -219,7 +221,7 @@ describe('Route B never says “Not indexed”', () => {
         for (const robots of robotsOptions) {
           for (const page of pages) {
             const r = evaluateIndex({ link: { ...ok().link, status, retryable }, page, robots });
-            expect(INDEX_STATUSES).toContain(r.status);
+            expect(SIGNAL_STATUSES).toContain(r.status);
             const text = [r.reason, ...r.evidence.map((e) => e.text)].join(' ');
             expect(text).not.toMatch(/not indexed/i);
             expect(r.evidence.length).toBeGreaterThan(0);

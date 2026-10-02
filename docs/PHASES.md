@@ -166,3 +166,19 @@ Checking moved from the browser to the server, on Cloudflare Queues. Closing the
 
 - Results describe whether a page **can** be indexed, not whether it **is**: Google's index can only be confirmed through Search Console (Phase 9, your own sites) or a search lookup (Phase 10, optional).
 - `<meta>` tags added by JavaScript aren't seen (Google usually does see them after rendering).
+
+## Decisions recorded in Phase 9 (Index Checker, part 2: Search Console)
+
+- **Service account, no sign-in screen:** the Google key file is the `GSC_SERVICE_ACCOUNT` secret. The Worker signs a JWT (RS256, Web Crypto, no libraries) and exchanges it for a one-hour, **read-only** (`webmasters.readonly`) token, kept per Worker instance. The signed JWT only ever goes to `oauth2.googleapis.com`, whatever the key file says. The key is never logged or returned; Settings shows only its email.
+- **Your sites are found automatically:** the properties shared with the service account are listed (`sites.list`, cached 10 minutes; “unverified” ones ignored). A URL uses the most specific property covering it: a URL-prefix property needs the same scheme, host and path prefix; a domain property (`sc-domain:`) covers every subdomain on http and https.
+- **Google's answer wins** (`gsc/judge.ts`): verdict PASS → **Indexed** (with “last crawled”); FAIL or NEUTRAL → **Not indexed**, with Google's coverage state as the reason (“Crawled - currently not indexed”, “URL is unknown to Google”…). The evidence adds Google's fetch problem, noindex/robots findings and canonical choice (shown when Google picked a different canonical than the page declares), then “Our own check:” with the crawler's signals, so conflicts stay visible. Any other verdict counts as no answer.
+- **Only Search Console says Indexed / Not indexed:** they're separate statuses (`SEARCH_CONSOLE_STATUSES`); the signals route can't produce them (tested).
+- **Quota:** Google allows 2,000 inspections per property per day (Pacific time) and 600 a minute. Each batch reserves what it needs in one statement (`gsc_usage`); the app stops at **1,900** a day per property. Over the limit, or when Google refuses (403), is busy (429) or doesn't answer, the link keeps its signal-based result with the first evidence line “Search Console unavailable (…), so this shows what our crawler saw”. A temporary page failure that will be retried isn't sent to Google until its last attempt, so retries don't use quota.
+- **Requests per batch:** up to 8 inspections + at most one token and one sites request, within the 45-request budget; if it runs out, the link waits for the next batch (as before). Database: at most 8 queries per index batch (one more for the quota).
+- **Settings → Google Search Console:** connection status, the email to add in Search Console (with Copy), each connected site with its type, permission and today's usage, and plain-English errors (bad key file, key rejected, no sites shared yet).
+- **Not testable here against real Google** (this build environment can't reach Google). Covered instead by tests against a fake Google with a real RSA key: the JWT's signature and claims are verified, plus property matching, verdict mapping, quota, fallbacks, caching and the Settings endpoint. Key signing was also run inside Cloudflare's runtime locally.
+
+## Known limits after Phase 9
+
+- Google's URL Inspection data can lag a few days behind Search Console's website.
+- Results for other people's sites still say whether a page **can** be indexed; an optional Google lookup for those comes in Phase 10.

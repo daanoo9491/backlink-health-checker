@@ -13,7 +13,13 @@ import type {
   SortDir,
 } from '../../shared/api';
 import { ISSUE_CATEGORIES, REVIEW_STATUSES, STATUS_SORT_ORDER } from '../../shared/issues';
-import { INDEX_SORT_ORDER, INDEX_STATUSES, type IndexEvidence, type IndexStatus } from '../../shared/index-status';
+import {
+  INDEX_SORT_ORDER,
+  INDEX_STATUSES,
+  type IndexEvidence,
+  type IndexSource,
+  type IndexStatus,
+} from '../../shared/index-status';
 import { LINK_STATUSES, type LinkStatus } from '../../shared/status';
 import { iso, num, type Db } from './db';
 
@@ -122,6 +128,7 @@ interface RowRecord {
   index_status: string | null;
   index_reason: string | null;
   index_evidence: IndexEvidence[] | null;
+  index_source: string | null;
   retry_at: string | number | null;
   http_status: number | null;
   final_url: string | null;
@@ -146,6 +153,8 @@ const GROUP_SQL: Record<Exclude<RowFilterGroup, 'all'>, string> = {
   unreachable: `u.status IN (${inList(category('unreachable'))}) AND u.retry_at IS NULL`,
   site_error: `u.status IN (${inList(category('site_error'))}) AND u.retry_at IS NULL`,
   refused: `u.status IN (${inList(category('refused'))}) AND u.retry_at IS NULL`,
+  indexed: `u.index_status = 'INDEXED'`,
+  not_indexed: `u.index_status = 'NOT_INDEXED' AND u.retry_at IS NULL`,
   indexable: `u.index_status = 'INDEXABLE'`,
   noindex: `u.index_status = 'NOINDEX' AND u.retry_at IS NULL`,
   robots_blocked: `u.index_status = 'ROBOTS_BLOCKED' AND u.retry_at IS NULL`,
@@ -229,7 +238,7 @@ export async function listRows(
     db.query<RowRecord>(
       `SELECT r.sheet_name, r.row_number, r.original_value, u.url, r.is_duplicate, r.invalid_reason,
               r.target_url, r.anchor_text, u.status, u.check_reason, u.page_title, u.retry_at, u.http_status, u.final_url,
-              u.response_time_ms, u.checked_at, u.index_status, u.index_reason, u.index_evidence
+              u.response_time_ms, u.checked_at, u.index_status, u.index_reason, u.index_evidence, u.index_source
        ${FROM} WHERE ${where}
        ORDER BY ${orderBy(filters.sort, filters.dir, tool)}
        LIMIT $${n + 1} OFFSET $${n + 2}`,
@@ -294,6 +303,7 @@ export async function listRows(
       indexStatus: (r.index_status as IndexStatus | null) ?? null,
       indexReason: r.index_reason,
       indexEvidence: r.index_evidence,
+      indexSource: (r.index_source as IndexSource | null) ?? null,
       retryAt: r.retry_at === null ? null : new Date(Number(r.retry_at) * 1000).toISOString(),
       httpStatus: r.http_status,
       finalUrl: r.final_url,

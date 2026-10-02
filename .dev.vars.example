@@ -14,3 +14,7 @@ SESSION_SECRET=replace-with-at-least-32-random-characters
 # blocks https://cloudflare-dns.com. Ignored unless APP_ENV=development.
 # APP_ENV=development
 # CHECKER_SKIP_DNS=true
+
+# Optional, Index Checker: Google Search Console. The whole service-account key
+# file, on one line, in single quotes. See README → Search Console setup.
+# GSC_SERVICE_ACCOUNT='{"type":"service_account","client_email":"…","private_key":"-----BEGIN PRIVATE KEY-----\n…"}'

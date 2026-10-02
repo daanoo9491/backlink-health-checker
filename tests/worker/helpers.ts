@@ -77,7 +77,9 @@ function adapter(pg: PGlite, counted = false): Db {
 export async function freshDb(): Promise<Db> {
   ready ??= start();
   const pg = await ready;
-  await pg.exec('TRUNCATE users, scans, unique_urls, scan_rows, login_attempts, heartbeat, robots_cache CASCADE');
+  await pg.exec(
+    'TRUNCATE users, scans, unique_urls, scan_rows, login_attempts, heartbeat, robots_cache, gsc_usage CASCADE',
+  );
   return adapter(pg);
 }
 

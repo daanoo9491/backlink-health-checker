@@ -1,7 +1,7 @@
 /**
  * Types shared by the Worker (backend) and the React app (frontend).
  */
-import type { IndexEvidence, IndexStatus } from './index-status';
+import type { IndexEvidence, IndexSource, IndexStatus } from './index-status';
 import type { LinkStatus } from './status';
 
 export interface HealthResponse {
@@ -170,6 +170,8 @@ export interface ScanRowView {
   indexStatus: IndexStatus | null;
   indexReason: string | null;
   indexEvidence: IndexEvidence[] | null;
+  /** Google Search Console's answer, or our crawler's signals. */
+  indexSource: IndexSource | null;
   httpStatus: number | null;
   finalUrl: string | null;
   responseTimeMs: number | null;
@@ -192,6 +194,8 @@ export const ROW_FILTER_GROUPS = [
   'site_error',
   'refused',
   // Index Checker results
+  'indexed',
+  'not_indexed',
   'indexable',
   'noindex',
   'robots_blocked',
@@ -205,6 +209,8 @@ export type RowFilterGroup = (typeof ROW_FILTER_GROUPS)[number];
 
 /** Filter group for each index result. */
 export const INDEX_GROUP: Record<IndexStatus, RowFilterGroup> = {
+  INDEXED: 'indexed',
+  NOT_INDEXED: 'not_indexed',
   INDEXABLE: 'indexable',
   NOINDEX: 'noindex',
   ROBOTS_BLOCKED: 'robots_blocked',
@@ -263,6 +269,18 @@ export interface DashboardSummary {
   recentScans: ScanSummary[];
   indexChecks: number;
   recentIndexChecks: ScanSummary[];
+}
+
+/** Settings: is Search Console connected, and which sites can it see? */
+export interface SearchConsoleStatus {
+  configured: boolean;
+  /** The service account's email, to add as a user in Search Console. */
+  email: string | null;
+  properties: { siteUrl: string; permissionLevel: string; usedToday: number }[];
+  /** URL inspections allowed per property per day (Google's limit, less a margin). */
+  dailyLimit: number;
+  /** Why the connection isn't working, in plain English. */
+  error: string | null;
 }
 
 export interface IndexCheckFromScanResponse {
