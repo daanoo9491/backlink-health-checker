@@ -1,10 +1,12 @@
 /**
  * Index Checker results.
  *
- * Route A (your own sites, Phase 9): Google Search Console's own record, the
- * only source allowed to say "Indexed" or "Not indexed".
- * Route B (everyone else's sites): signals any crawler can read. None of
- * these claims anything about Google's index, so those words never appear.
+ * "Indexed" / "Not indexed" come only from Google itself:
+ *  - Google Search Console, for your own sites (Phase 9), or
+ *  - a Google search for the exact URL, run by the browser helper in a team
+ *    member's own Chrome (Phase 10).
+ * Everything else is what our crawler saw (robots.txt, noindex, canonical…),
+ * which says whether a page CAN be indexed, never whether it IS.
  */
 import type { StatusTone } from './status';
 
@@ -20,9 +22,9 @@ export const INDEX_STATUSES = [
 ] as const;
 export type IndexStatus = (typeof INDEX_STATUSES)[number];
 
-/** Only these come from our own crawler's signals; the other two only from Search Console. */
+/** Only these come from our own crawler's signals; the other two only from Google. */
 export const SIGNAL_STATUSES = INDEX_STATUSES.filter((s) => s !== 'INDEXED' && s !== 'NOT_INDEXED');
-export const SEARCH_CONSOLE_STATUSES: readonly IndexStatus[] = ['INDEXED', 'NOT_INDEXED'];
+export const GOOGLE_STATUSES: readonly IndexStatus[] = ['INDEXED', 'NOT_INDEXED'];
 
 export interface IndexStatusInfo {
   label: string;
@@ -37,15 +39,16 @@ export const INDEX_STATUS_INFO: Record<IndexStatus, IndexStatusInfo> = {
   INDEXED: {
     label: 'Indexed',
     tone: 'active',
-    description: 'Google Search Console confirms the page is on Google.',
+    description: 'Google has this page: Search Console confirms it, or a Google search for the exact URL found it.',
     advice: 'Nothing to fix.',
   },
   NOT_INDEXED: {
     label: 'Not indexed',
     tone: 'dead',
-    description: 'Google Search Console confirms the page is not on Google, and says why.',
+    description:
+      'Not on Google: Search Console says so (with its reason), or a Google search for the exact URL didn’t find it.',
     advice:
-      'Google says this page isn’t on Google; the reason is shown on each row. Fix the cause, then ask Google to index it again from Search Console.',
+      'Google doesn’t show this page, so the backlink on it passes little value. Check the reasons on each row; ask the site owner to fix them, or replace the backlink.',
   },
   INDEXABLE: {
     label: 'Indexable',
@@ -101,11 +104,11 @@ export const INDEX_SORT_ORDER: readonly IndexStatus[] = [
 ];
 
 /** Where a result came from. */
-export type IndexSource = 'search_console' | 'signals';
+export type IndexSource = 'search_console' | 'google_search' | 'signals';
 
 /** One line of evidence behind an index result. `bad` lines explain a problem. */
 export interface IndexEvidence {
-  signal: 'gsc' | 'page' | 'robots' | 'meta' | 'header' | 'canonical';
+  signal: 'gsc' | 'google' | 'page' | 'robots' | 'meta' | 'header' | 'canonical';
   text: string;
   bad?: boolean;
 }

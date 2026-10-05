@@ -78,7 +78,7 @@ export async function freshDb(): Promise<Db> {
   ready ??= start();
   const pg = await ready;
   await pg.exec(
-    'TRUNCATE users, scans, unique_urls, scan_rows, login_attempts, heartbeat, robots_cache, gsc_usage CASCADE',
+    'TRUNCATE users, scans, unique_urls, scan_rows, login_attempts, heartbeat, robots_cache, gsc_usage, helper_tokens CASCADE',
   );
   return adapter(pg);
 }

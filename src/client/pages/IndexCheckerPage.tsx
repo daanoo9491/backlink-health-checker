@@ -82,12 +82,13 @@ export function IndexCheckerPage() {
           the canonical. The result says whether a page <strong>can</strong> be indexed, with the evidence.
         </p>
         <p>
-          For your own sites connected to <Link to="/settings">Google Search Console</Link>, Google’s own record is used
-          instead: <strong>Indexed</strong> or <strong>Not indexed</strong>, with Google’s reason.
+          To find out whether each page is <strong>on Google</strong>, the <Link to="/settings">browser helper</Link>{' '}
+          searches Google for it from your own Chrome and shows <strong>Indexed</strong> or <strong>Not indexed</strong>
+          . For your own sites, <Link to="/settings">Google Search Console</Link> can answer instead.
         </p>
         <p className="notice notice-info">
-          Other sites are never labelled “Not indexed”: only Search Console can confirm that. A check that fails shows
-          as “Unknown”, never as a negative.
+          Our own crawler never says “Not indexed”: only Google’s answer does. A check that fails shows as “Unknown”,
+          never as a negative.
         </p>
         <div className="check-actions">
           <Link to="/index-checker/new" className="button button-primary">

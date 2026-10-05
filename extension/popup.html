@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>LinkLedger helper</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="icons/icon48.png" alt="" width="28" height="28" />
+      <div>
+        <h1>LinkLedger helper</h1>
+        <p class="sub">Google index check for your backlinks</p>
+      </div>
+    </header>
+
+    <section id="connect" hidden>
+      <p>Connect this browser to LinkLedger SEO.</p>
+      <label for="appUrl">LinkLedger address</label>
+      <input id="appUrl" type="url" placeholder="https://backlink-health-checker…workers.dev" />
+      <label for="token">Connection code</label>
+      <input id="token" type="password" placeholder="llh_…" autocomplete="off" />
+      <p class="hint">Create the code in LinkLedger → Settings → Browser helper.</p>
+      <button id="connectBtn" class="primary">Connect</button>
+    </section>
+
+    <section id="main" hidden>
+      <p class="who">Connected as <strong id="email"></strong></p>
+      <p id="message" class="message" role="status"></p>
+      <dl class="stats">
+        <div>
+          <dt>Waiting</dt>
+          <dd id="pending">–</dd>
+        </div>
+        <div>
+          <dt>Searched today</dt>
+          <dd id="today">–</dd>
+        </div>
+      </dl>
+      <div class="actions">
+        <button id="startBtn" class="primary">Start</button>
+        <button id="resumeBtn" class="primary" hidden>Resume</button>
+        <button id="pauseBtn" hidden>Pause</button>
+      </div>
+      <label for="limit">Searches per day (at most)</label>
+      <input id="limit" type="number" min="10" max="2000" step="10" />
+      <p class="hint">
+        Keep Chrome open while it works. It searches at a person’s pace (one search every 8–16 seconds) in a minimised
+        Google window. If Google asks whether you’re a robot, answer it there, then press Resume.
+      </p>
+      <button id="disconnectBtn" class="link">Disconnect</button>
+    </section>
+
+    <p id="error" class="error" role="alert" hidden></p>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

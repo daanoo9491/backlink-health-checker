@@ -23,6 +23,11 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.serviceworker } },
   },
   {
+    // The browser helper (Chrome extension): plain JavaScript modules.
+    files: ['extension/**/*.js'],
+    languageOptions: { globals: { ...globals.browser, ...globals.webextensions } },
+  },
+  {
     files: ['*.config.{js,ts}', 'scripts/**/*.{js,mjs}'],
     languageOptions: { globals: globals.node },
   },

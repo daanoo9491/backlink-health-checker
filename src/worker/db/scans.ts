@@ -249,11 +249,20 @@ export async function listRows(
       base.params,
     ),
     // One pass over the scan's links gives both the HTTP codes and the per-result counts.
-    db.query<{ status: string; retrying: boolean; code: number | null; idx: string | null; n: number }>(
+    db.query<{
+      status: string;
+      retrying: boolean;
+      code: number | null;
+      idx: string | null;
+      gq: boolean;
+      n: number;
+    }>(
       `SELECT status, (retry_at IS NOT NULL) AS retrying, http_status AS code, index_status AS idx,
+              (google_status IS NULL AND index_status IS NOT NULL AND index_status <> 'NOT_REACHABLE'
+               AND retry_at IS NULL AND index_source IS DISTINCT FROM 'search_console') AS gq,
               COUNT(*)::int AS n
        FROM unique_urls WHERE scan_id = $1
-       GROUP BY 1, 2, 3, 4`,
+       GROUP BY 1, 2, 3, 4, 5`,
       [scanId],
     ),
   ]);
@@ -261,6 +270,7 @@ export async function listRows(
   const byStatus: Partial<Record<LinkStatus, number>> = {};
   const byIndex: Partial<Record<IndexStatus, number>> = {};
   let retrying = 0;
+  let googlePending = 0;
   const codes = new Set<number>();
   for (const l of links) {
     if (l.code !== null) codes.add(num(l.code));
@@ -268,6 +278,7 @@ export async function listRows(
       const ix = l.idx as IndexStatus;
       byIndex[ix] = (byIndex[ix] ?? 0) + num(l.n);
     }
+    if (l.gq) googlePending += num(l.n);
     if (l.retrying) retrying += num(l.n);
     else if ((LINK_STATUSES as readonly string[]).includes(l.status)) {
       const st = l.status as LinkStatus;
@@ -287,6 +298,7 @@ export async function listRows(
       sheets: sheetNames,
       links: { byStatus, retrying },
       index: byIndex,
+      googlePending,
     },
     rows: rows.map((r) => ({
       sheet: r.sheet_name,

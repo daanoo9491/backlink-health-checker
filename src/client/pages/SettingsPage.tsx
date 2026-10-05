@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import type { HealthResponse, SearchConsoleStatus } from '../../shared/api';
+import type { HealthResponse, HelperTokenCreated, HelperTokenList, SearchConsoleStatus } from '../../shared/api';
+import { RequestError } from '../api/client';
+import { formatDate } from '../lib/format';
 import { formatNumber } from '../lib/format';
 import { api } from '../api/client';
 import { useAuth } from '../auth/auth-context';
@@ -43,6 +45,8 @@ export function SettingsPage() {
           Sign out
         </button>
       </section>
+
+      <HelperSection />
 
       <SearchConsoleSection />
 
@@ -150,6 +154,128 @@ function SearchConsoleSection() {
         <button type="button" className="button button-secondary" onClick={load} disabled={loading}>
           {loading ? 'Checking…' : 'Check again'}
         </button>
+      )}
+    </section>
+  );
+}
+
+/** Index Checker: the Chrome helper that searches Google for each backlink. */
+function HelperSection() {
+  const [tokens, setTokens] = useState<HelperTokenList['tokens'] | null>(null);
+  const [created, setCreated] = useState<HelperTokenCreated | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const fetchTokens = () =>
+    api<HelperTokenList>('/helper/tokens')
+      .then((r) => setTokens(r.tokens))
+      .catch(() => setTokens([]));
+  useEffect(() => {
+    void fetchTokens();
+  }, []);
+
+  async function create() {
+    setBusy(true);
+    setError(null);
+    setCopied(false);
+    try {
+      setCreated(
+        await api<HelperTokenCreated>('/helper/tokens', {
+          method: 'POST',
+          body: JSON.stringify({ label: `Chrome · ${formatDate(new Date().toISOString())}` }),
+        }),
+      );
+      await fetchTokens();
+    } catch (e) {
+      setError(e instanceof RequestError ? e.message : 'Couldn’t create a code. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke(id: string) {
+    await api(`/helper/tokens/${id}`, { method: 'DELETE' }).catch(() => undefined);
+    if (created?.id === id) setCreated(null);
+    await fetchTokens();
+  }
+
+  return (
+    <section className="panel" aria-labelledby="helper-heading">
+      <h2 id="helper-heading" className="section-title">
+        Browser helper (Google index check)
+      </h2>
+      <p>
+        A small Chrome extension that searches Google for each backlink from your own browser, then shows{' '}
+        <strong>Indexed</strong> or <strong>Not indexed</strong> in your index checks. Works for any website, no Search
+        Console needed.
+      </p>
+      <ol className="plain-list">
+        <li>
+          <a href="/downloads/linkledger-helper.zip" download>
+            Download the helper
+          </a>{' '}
+          and unzip it.
+        </li>
+        <li>
+          In Chrome, open <code>chrome://extensions</code>, switch on <strong>Developer mode</strong> (top right), click{' '}
+          <strong>Load unpacked</strong> and choose the <code>linkledger-helper</code> folder.
+        </li>
+        <li>
+          Create a connection code below, then open the helper (puzzle icon → LinkLedger helper) and paste it with this
+          page’s address: <code>{window.location.origin}</code>
+        </li>
+        <li>
+          Press <strong>Start</strong>. Keep Chrome open; it works through your index checks at a person’s pace.
+        </li>
+      </ol>
+
+      {created && (
+        <div className="notice notice-info" role="status">
+          <p className="notice-title">Your connection code (shown only now)</p>
+          <div className="copy-row">
+            <code>{created.token}</code>
+            <button
+              type="button"
+              className="button button-quiet button-small"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(created.token);
+                  setCopied(true);
+                } catch {
+                  setCopied(false);
+                }
+              }}
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <p>Treat it like a password. Anyone with it can add Google results to your index checks.</p>
+        </div>
+      )}
+      {error && (
+        <p className="notice notice-error" role="alert">
+          {error}
+        </p>
+      )}
+      <button type="button" className="button button-secondary" onClick={create} disabled={busy}>
+        {busy ? 'Creating…' : 'Create a connection code'}
+      </button>
+
+      {tokens && tokens.length > 0 && (
+        <ul className="gsc-list" aria-label="Connected helpers">
+          {tokens.map((t) => (
+            <li key={t.id}>
+              <span className="gsc-site">{t.label}</span>
+              <span className="gsc-meta">
+                {t.lastUsedAt ? `Last used ${formatDate(t.lastUsedAt)}` : 'Not used yet'} ·{' '}
+                <button type="button" className="button button-quiet button-small" onClick={() => revoke(t.id)}>
+                  Remove
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

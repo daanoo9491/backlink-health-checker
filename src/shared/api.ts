@@ -248,6 +248,8 @@ export interface RowFacets {
   links: { byStatus: Partial<Record<LinkStatus, number>>; retrying: number };
   /** Unique links per index result (Index Checker scans), excluding links waiting for a retry. */
   index: Partial<Record<IndexStatus, number>>;
+  /** Index checks: links waiting for the browser helper's Google search. */
+  googlePending: number;
 }
 
 export interface ScanRowsResponse {
@@ -281,6 +283,27 @@ export interface SearchConsoleStatus {
   dailyLimit: number;
   /** Why the connection isn't working, in plain English. */
   error: string | null;
+}
+
+// ---------- Browser helper (Phase 10) ----------
+
+export interface HelperTokenList {
+  tokens: { id: string; label: string; createdAt: string; lastUsedAt: string | null }[];
+}
+/** The code itself is only ever returned here, once. */
+export interface HelperTokenCreated {
+  id: string;
+  label: string;
+  token: string;
+}
+export interface HelperStatusResponse {
+  email: string;
+  /** Links waiting for a Google search. */
+  pending: number;
+  checkedToday: number;
+}
+export interface HelperClaimResponse {
+  jobs: { id: string; url: string }[];
 }
 
 export interface IndexCheckFromScanResponse {

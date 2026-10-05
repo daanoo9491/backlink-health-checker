@@ -18,7 +18,7 @@ import {
   INDEX_SORT_ORDER,
   INDEX_STATUSES,
   INDEX_STATUS_INFO,
-  SEARCH_CONSOLE_STATUSES,
+  GOOGLE_STATUSES,
   type IndexStatus,
 } from '../../shared/index-status';
 import { ISSUE_CATEGORIES, REVIEW_STATUSES } from '../../shared/issues';
@@ -182,6 +182,17 @@ export function ScanPage() {
     };
   }, [active, id]);
 
+  // Index checks: while the browser helper still has links to search on
+  // Google, reload the table now and then to show its answers.
+  const googlePending = rows?.facets.googlePending ?? 0;
+  useEffect(() => {
+    if (googlePending === 0 || active) return;
+    const timer = setInterval(() => {
+      if (!document.hidden) setRowsVersion((v) => v + 1);
+    }, 20_000);
+    return () => clearInterval(timer);
+  }, [googlePending, active]);
+
   // Coming straight from "Start scan" or pasted links: start checking by itself, once.
   // (The flag is cleared from the page history so a refresh doesn't restart it.)
   useEffect(() => {
@@ -271,8 +282,8 @@ export function ScanPage() {
     { label: 'Waiting', value: waiting, group: 'waiting' },
   ];
   const indexCards: { label: string; value: number; tone?: string; group: RowFilterGroup }[] = [
-    // Indexed / Not indexed come only from Search Console: shown when it answered.
-    ...INDEX_STATUSES.filter((s) => !SEARCH_CONSOLE_STATUSES.includes(s) || ixCount(s) > 0).map((s) => ({
+    // Indexed / Not indexed come only from Google: shown once Google has answered.
+    ...INDEX_STATUSES.filter((s) => !GOOGLE_STATUSES.includes(s) || ixCount(s) > 0).map((s) => ({
       label: INDEX_STATUS_INFO[s].label,
       value: ixCount(s),
       tone: ixCount(s) ? INDEX_STATUS_INFO[s].tone : undefined, // a zero isn't a warning
@@ -285,7 +296,7 @@ export function ScanPage() {
     !links
       ? []
       : isIndex
-        ? INDEX_SORT_ORDER.filter((s) => s !== 'INDEXABLE' && ixCount(s) > 0).map((s) => ({
+        ? INDEX_SORT_ORDER.filter((s) => s !== 'INDEXABLE' && s !== 'INDEXED' && ixCount(s) > 0).map((s) => ({
             key: s,
             group: INDEX_GROUP[s],
             label: INDEX_STATUS_INFO[s].label,
@@ -342,9 +353,9 @@ export function ScanPage() {
 
       {isIndex && (
         <p className="notice notice-info">
-          For your own sites connected to Google Search Console, results are Google’s own answer:{' '}
-          <strong>Indexed</strong> or <strong>Not indexed</strong>. For other sites they show whether Google{' '}
-          <strong>can</strong> index each page, from what any crawler can see, and never say “Not indexed”.
+          <strong>Indexed</strong> / <strong>Not indexed</strong> come from Google itself: a Google search by the
+          browser helper, or Search Console for your own sites. Until Google has answered, a page shows what our crawler
+          saw: whether Google <strong>can</strong> index it.
           {scan.sourceScanId && (
             <>
               {' '}
@@ -358,6 +369,20 @@ export function ScanPage() {
         <p className="notice notice-error" role="alert">
           {error}
         </p>
+      )}
+
+      {isIndex && googlePending > 0 && !active && (
+        <section className="panel" aria-labelledby="google-heading">
+          <h2 id="google-heading" className="section-title" aria-live="polite">
+            Google check: {formatNumber(googlePending)} {googlePending === 1 ? 'link is' : 'links are'} waiting for the
+            browser helper
+          </h2>
+          <p>
+            The browser helper searches Google for each link from your own Chrome and fills in <strong>Indexed</strong>{' '}
+            or <strong>Not indexed</strong> here. Keep Chrome open with the helper started; this page updates by itself.
+          </p>
+          <Link to="/settings">Set up the browser helper</Link>
+        </section>
       )}
 
       {showPanel && (
@@ -779,6 +804,7 @@ function IndexRowView({ r }: { r: ScanRowView }) {
           <>
             <IndexStatusBadge status={r.indexStatus} />
             {r.indexSource === 'search_console' && <span className="source-tag">Search Console</span>}
+            {r.indexSource === 'google_search' && <span className="source-tag">Google search</span>}
             {r.indexReason && <span className="check-reason">{r.indexReason}</span>}
             {r.retryAt && <span className="check-reason">Trying again automatically soon</span>}
             {r.indexEvidence && r.indexEvidence.length > 0 && (

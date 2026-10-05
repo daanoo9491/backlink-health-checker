@@ -22,3 +22,6 @@ Thumbs.db
 !.vscode/extensions.json
 .idea/
 *.log
+
+# Built from extension/ by scripts/zip-extension.mjs
+public/downloads/

@@ -9,7 +9,9 @@ An internal tool for our Marketing team, with two tools behind one sign-in:
 
 The app runs on Cloudflare; data is stored in Supabase Postgres.
 
-> **Current status: Phase 9 (Index Checker, part 2: Search Console).** Pages on your own sites connected to Google Search Console get Google's own answer, **Indexed** or **Not indexed** with Google's reason (e.g. “Crawled - currently not indexed”), via the URL Inspection API. Everyone else's pages keep the signal-based results. See _Search Console setup_ below.
+> **Current status: Phase 10 (Google check through the browser helper).** A small Chrome extension (`extension/`, downloadable from Settings) searches Google for each link of an index check from a team member's own browser, at a person's pace, and fills in **Indexed / Not indexed** for any website, with no API key and no Search Console. See _Browser helper_ below.
+>
+> **Phase 9 (Index Checker, part 2: Search Console).** Pages on your own sites connected to Google Search Console get Google's own answer, **Indexed** or **Not indexed** with Google's reason (e.g. “Crawled - currently not indexed”), via the URL Inspection API. Everyone else's pages keep the signal-based results. See _Search Console setup_ below.
 >
 > **Phase 8 (Index Checker, part 1).** Paste or upload URLs, or run it on a Link Health scan. For each page it reads robots.txt (as Googlebot), the meta robots tag, the X-Robots-Tag header and the canonical, and reports **Indexable**, **Blocked from indexing**, **Crawling blocked**, **Canonical points elsewhere**, **Page not reachable** or **Unknown**, with the evidence. It never says “Not indexed”: only Search Console can (Phase 9).
 >
@@ -178,6 +180,12 @@ It reads D1 through your `npx wrangler login`, matches users by email (scans att
 **Cron (every 10 minutes):** restarts any scan whose background chain went quiet for 10 minutes (e.g. a message that failed all its retries), and writes one row to `heartbeat`. Supabase pauses free projects after about a week without activity, so this also keeps the project awake.
 
 **Local development:** `npm run dev` connects to the `localConnectionString` in `wrangler.jsonc` (`postgres://postgres:postgres@localhost:5432/postgres`). Run a Postgres there (for example `supabase start`, or Docker `postgres:16`), then `DATABASE_URL=… npm run db:migrate`. Queues run locally inside `npm run dev` with no setup.
+
+### Browser helper (Google index check, Phase 10)
+
+Nothing to set up on Cloudflare. Each person who wants Google checks: Settings → **Browser helper** → download, load it in Chrome (Developer mode → Load unpacked), create a connection code, paste it into the helper with the app's address, press **Start**. Details in [`extension/README.md`](extension/README.md).
+
+The helper's zip is built from `extension/` on every build (`scripts/zip-extension.mjs`) and served at `/downloads/linkledger-helper.zip`. It talks to the app's `/api/helper/*` endpoints with its connection code (a Bearer code; only its SHA-256 hash is stored; removable in Settings).
 
 ### Search Console setup (optional, Phase 9)
 

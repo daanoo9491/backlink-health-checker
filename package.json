@@ -1,6 +1,6 @@
 {
   "name": "backlink-health-checker",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "type": "module",
   "description": "Upload a backlink workbook, check which backlink pages are still alive, export the results.",
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && node scripts/zip-extension.mjs && vite build",
     "preview": "npm run build && vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -50,6 +50,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.12.0",
+    "happy-dom": "^20.14.5",
     "prettier": "^3.9.9",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.70.1",

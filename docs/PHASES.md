@@ -182,3 +182,22 @@ Checking moved from the browser to the server, on Cloudflare Queues. Closing the
 
 - Google's URL Inspection data can lag a few days behind Search Console's website.
 - Results for other people's sites still say whether a page **can** be indexed; an optional Google lookup for those comes in Phase 10.
+
+## Decisions recorded in Phase 10 (Google check through the browser helper)
+
+Changed from the plan (paid search-data provider) at the team's request: no API, works for any website.
+
+- **Why a browser extension:** Google doesn't let servers query its results (its search API is closed to new customers; scraping from Cloudflare is blocked and against its terms), and Search Console only covers sites you own. A person's own Chrome can search Google normally, so the helper does it there, slowly, and reports back.
+- **The extension** (`extension/`, Manifest V3, plain JavaScript, no build step): opens one minimised Google window and reuses its tab; searches `site:host/path` for each link (the quoted address when it has a `?query`), with `hl=en`, `filter=0`, `pws=0`; reads the result links inside the tab (`lib/page.js`, unwrapping `/url?q=` and skipping Google's own links); compares addresses ignoring http/https, `www.`, case, trailing slash and `#fragment` (`lib/google.js`). **FOUND** = the exact page is listed, **NOT_FOUND** = Google answered without it.
+- **A person's pace, and no evasion:** one search every 8–16 s, 3 links taken at a time, 400 searches a day by default (popup setting, 10–2,000). A CAPTCHA (“unusual traffic”) or Google's cookie page stops the helper and shows the window for the person to answer; nothing tries to solve or avoid it (no proxies, no solving services). No internet: it waits and retries every minute. Links it didn't search are handed straight back (`SKIP`, no try counted).
+- **App side** (`/api/helper/*`): connection codes (`llh_…`, 32 random bytes, shown once, SHA-256 stored, revocable, max 10 per user) authenticate the helper as its user; cookie sessions are not accepted there and the Origin (CSRF) check is skipped only for Bearer requests to those routes. `claim` hands out up to 10 links from that user's index checks, newest check first, locking each for 10 minutes (`FOR UPDATE SKIP LOCKED`, materialised); it skips pages that didn't load, links waiting for an automatic retry, Link Health scans and links Search Console already answered. `results` accepts FOUND / NOT_FOUND / ERROR / SKIP; the evidence text is built on the server, not taken from the helper. ERROR three times → marked ERROR and not tried again; the crawler's result stays.
+- **Results:** FOUND → **Indexed**, NOT_FOUND → **Not indexed** (`index_source = 'google_search'`, tagged “Google search”), with the search as the first evidence line (“Google search for “site:…”: no results”) and our crawler's evidence underneath. Search Console answers are never overwritten. Scan counters are recounted. Our own crawler still can never say Indexed / Not indexed (tested).
+- **Scan page:** index checks show “Google check: N links waiting for the browser helper” and refresh the table every 20 s until done. Settings → **Browser helper**: download, 4 install steps, create/copy/remove connection codes.
+- **Tested** with unit tests (search, address matching, page reading against Google-like HTML with happy-dom, CAPTCHA and cookie pages) and API tests (codes, queue, locking, answers, retries, hand-back, other users' data, Search Console precedence, malformed reports), and end to end: the real extension loaded in Chromium, connected through its popup to the app in Cloudflare's runtime, with Google simulated at the network level (the build environment can't reach Google): one page Indexed, one Not indexed, then a CAPTCHA paused it and handed the last link back.
+- **Bug found and fixed on the way:** links waiting for the Google check were left out of the per-result totals on the scan page.
+
+## Known limits after Phase 10
+
+- “Not indexed” from a search is right almost always, but Google occasionally leaves an indexed page out of `site:` results; Search Console (your own sites) is the authoritative answer.
+- The helper only runs while Chrome is open on someone's computer; large checks take time (about 300 links an hour) and Google may ask for a CAPTCHA now and then.
+- Google's terms don't allow automated searches; the helper keeps to a person's pace and stops for every check Google shows, but the team should keep daily volumes modest.
