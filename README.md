@@ -9,7 +9,9 @@ An internal tool for our Marketing team, with two tools behind one sign-in:
 
 The app runs on Cloudflare; data is stored in Supabase Postgres.
 
-> **Current status: Phase 10 (Google check through the browser helper).** A small Chrome extension (`extension/`, downloadable from Settings) searches Google for each link of an index check from a team member's own browser, at a person's pace, and fills in **Indexed / Not indexed** for any website, with no API key and no Search Console. See _Browser helper_ below.
+> **Current status: Phase 11 (Excel/CSV download).** Every scan and index check has **Download the results**: an Excel file (Results + Summary sheets) or a CSV with every original column of the uploaded file followed by the results (link status, HTTP code, final URL, page title, index status, where the answer came from, evidence, dates). Download all rows or only the rows matching the current filters. The file is built in the browser, so it works on the free plan even for 20,000 rows.
+>
+> **Phase 10 (Google check through the browser helper).** A small Chrome extension (`extension/`, downloadable from Settings) searches Google for each link of an index check from a team member's own browser, at a person's pace, and fills in **Indexed / Not indexed** for any website, with no API key and no Search Console. See _Browser helper_ below.
 >
 > **Phase 9 (Index Checker, part 2: Search Console).** Pages on your own sites connected to Google Search Console get Google's own answer, **Indexed** or **Not indexed** with Google's reason (e.g. “Crawled - currently not indexed”), via the URL Inspection API. Everyone else's pages keep the signal-based results. See _Search Console setup_ below.
 >
@@ -33,7 +35,7 @@ Browser ──► Cloudflare Worker
 Daily Cron Trigger ──► keep-alive write (stops Supabase's free plan pausing the project)
              Queue `bhc-checks` ──► same Worker (queue consumer): one message = 8 links
              Cron every 10 min ──► restart stalled scans · keep Supabase awake
-Later phases add:  R2 (large exports) · scheduled rechecks
+Later phases add:  scheduled rechecks
 ```
 
 | Layer           | Technology                                                |
@@ -52,6 +54,7 @@ Later phases add:  R2 (large exports) · scheduled rechecks
 src/
   client/        React app (UI)
     import/      Excel reader + backlink import (runs in a Web Worker)
+    export/      Excel/CSV download (built in the browser)
   worker/        Cloudflare Worker (API)
     routes/      API route modules
     middleware/  Security headers, request IDs

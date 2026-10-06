@@ -309,3 +309,42 @@ export interface HelperClaimResponse {
 export interface IndexCheckFromScanResponse {
   id: string;
 }
+
+// ---------- Export (Phase 11) ----------
+
+/** One row of a scan for download: the original cells plus every result. */
+export interface ExportRow {
+  sheet: string;
+  row: number;
+  value: string;
+  /** Every original column of the uploaded row (header -> text). */
+  cells: Record<string, string>;
+  url: string | null;
+  duplicate: boolean;
+  invalidReason: string | null;
+  targetUrl: string | null;
+  anchorText: string | null;
+  status: string | null;
+  checkReason: string | null;
+  retryAt: string | null;
+  httpStatus: number | null;
+  finalUrl: string | null;
+  pageTitle: string | null;
+  responseTimeMs: number | null;
+  checkedAt: string | null;
+  indexStatus: IndexStatus | null;
+  indexReason: string | null;
+  indexEvidence: IndexEvidence[] | null;
+  indexSource: IndexSource | null;
+  googleCheckedAt: string | null;
+}
+
+export const EXPORT_PAGE_SIZE = 250;
+
+export interface ExportPageResponse {
+  rows: ExportRow[];
+  /** Pass back as `after` for the next page; null when this was the last page. */
+  next: string | null;
+  /** Rows matching the filters (first page only). */
+  total: number | null;
+}

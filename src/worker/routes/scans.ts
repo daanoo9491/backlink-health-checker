@@ -13,6 +13,7 @@ import {
   ROW_FILTER_GROUPS,
   ROW_SORTS,
   type CreateScanResponse,
+  type ExportPageResponse,
   type IndexCheckFromScanResponse,
   type ScanTool,
   type RowFilterGroup,
@@ -24,6 +25,7 @@ import {
 import type { AppContext } from '../env';
 import { apiError } from '../errors';
 import { requireAuth } from '../middleware/auth';
+import { exportRows } from '../db/export';
 import { getScan, listRows, listScans, toDetail, toSummary } from '../db/scans';
 import { pauseChecking, startChecking } from '../queue';
 import { parseAddRows, parseAddUrls, parseCreateScan, ValidationError } from '../validation';
@@ -246,6 +248,21 @@ scanRoutes.get('/:id/rows', async (c) => {
     scan.tool,
   );
   return c.json<ScanRowsResponse>({ rows, total, page, pageSize, facets });
+});
+
+/**
+ * Rows for the Excel/CSV download, a page at a time in the workbook's order
+ * (the browser builds the file). Same filters as /rows; sorting is ignored.
+ */
+scanRoutes.get('/:id/export', async (c) => {
+  const scan = await getScan(c.get('db'), c.get('user')!.id, c.req.param('id'));
+  if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was deleted.');
+  if (scan.status === 'uploading') {
+    return apiError(c, 409, 'NOT_READY', 'This upload didn’t finish, so there is nothing to download.');
+  }
+  const page = await exportRows(c.get('db'), scan.id, readFilters(c.req.query()), c.req.query('after') ?? '');
+  c.header('Cache-Control', 'no-store');
+  return c.json<ExportPageResponse>(page);
 });
 
 /** Unknown or oversized filter values are ignored rather than rejected. */

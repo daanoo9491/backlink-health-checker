@@ -201,3 +201,19 @@ Changed from the plan (paid search-data provider) at the team's request: no API,
 - “Not indexed” from a search is right almost always, but Google occasionally leaves an indexed page out of `site:` results; Search Console (your own sites) is the authoritative answer.
 - The helper only runs while Chrome is open on someone's computer; large checks take time (about 300 links an hour) and Google may ask for a CAPTCHA now and then.
 - Google's terms don't allow automated searches; the helper keeps to a person's pace and stops for every check Google shows, but the team should keep daily volumes modest.
+
+## Decisions recorded in Phase 11 (Excel/CSV download)
+
+- **Built in the browser, not on the server.** A Worker on the free plan gets about 10 ms of CPU per request: not enough to zip thousands of rows. `GET /api/scans/:id/export` only hands out rows, 250 at a time, and the page builds the file (`src/client/export/`). Nothing is stored, so no R2 bucket is needed. A 5,000-row index check builds in well under a second.
+- **Paging by position in the workbook** (`after=<seq>`), not by page number, so rows that change while checking is still running are never skipped or repeated (tested). The total is counted on the first page only. A malformed cursor starts from the beginning.
+- **Same filters as the results table** (result, sheet, HTTP code, search). The panel offers “All rows” or “Only rows matching your filters” when any filter is on. Rows are always in the workbook's order; sorting is left to Excel (the header row has filter buttons).
+- **Columns:** every original column, in the upload's order and exactly as uploaded, then Sheet, Row, Checked URL, Note (skipped reason or “Same link as an earlier row”), and the results. Index checks: Index status, Answer from (Google search / Search Console / our crawler), Index reason, Evidence (problems marked ✗), Google checked at, then the link columns. Link columns: Link status, Status details, HTTP code, Final URL (only when different), Page title, Response time, Checked at. Labels are the same plain words as on screen; retrying links say “(retrying automatically)”, unchecked ones “Waiting”. A result column never hides an original column with the same name: it becomes “… (LinkLedger)”.
+- **Excel file** (`xlsx-writer.ts`, using `fflate`, already a dependency): text as inline strings (never formulas), dates as real Excel dates in the downloader's local time, numbers as numbers, bold frozen header row with filter buttons, column widths fitted to the content, a **Summary** sheet (file, tool, dates, filters, rows per result). Characters XML can't hold are dropped; text is cut at Excel's 32,767-character cell limit; sheet names follow Excel's rules.
+- **CSV:** UTF-8 with a byte-order mark and CRLF line ends, so Excel opens accents and non-Latin text correctly. **Formula injection guard:** any text starting with `=`, `+`, `-`, `@`, tab or CR (from an uploaded cell or a checked page's title) gets a leading apostrophe so spreadsheet apps show it as text.
+- **File names:** “<upload name> - LinkLedger link|index results [(filtered)] YYYY-MM-DD.xlsx”, with characters Windows doesn't allow removed.
+- **Checked:** unit tests read the Excel files back with the app's own reader; the files were also opened with openpyxl and LibreOffice; end to end in Chrome against Cloudflare's runtime and Postgres: Excel download of a finished scan, filtered CSV, and Excel of an index check.
+
+## Known limits after Phase 11
+
+- Very large files (the 20,000-row maximum) take a few seconds to collect (80 small requests); the panel shows progress and can be cancelled.
+- Hyperlinks in the original workbook are exported as their text (the address), not as clickable links.

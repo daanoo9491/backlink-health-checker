@@ -1,38 +1,7 @@
 import { useEffect, useId, useState } from 'react';
-import type { RowFacets, RowFilterGroup, RowFilters } from '../../shared/api';
-import { INDEX_GROUP, type ScanTool } from '../../shared/api';
-import { INDEX_STATUSES, INDEX_STATUS_INFO } from '../../shared/index-status';
-import { ISSUE_CATEGORIES } from '../../shared/issues';
+import type { RowFacets, RowFilters, ScanTool } from '../../shared/api';
+import { INDEX_GROUPS, LINK_GROUPS as GROUPS } from '../lib/group-labels';
 import { formatNumber } from '../lib/format';
-
-/** `sub` groups (issue categories) appear only while selected, from the Issues list. */
-const GROUPS: { key: RowFilterGroup; label: string; tone?: string; sub?: boolean }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'active', label: 'Active', tone: 'active' },
-  { key: 'dead', label: 'Dead', tone: 'dead' },
-  { key: 'redirected', label: 'Redirected', tone: 'redirected' },
-  { key: 'review', label: 'Need a look', tone: 'review' },
-  ...ISSUE_CATEGORIES.filter((c) => c.tone === 'review').map((c) => ({
-    key: c.key as RowFilterGroup,
-    label: c.label,
-    tone: 'review',
-    sub: true,
-  })),
-  { key: 'waiting', label: 'Waiting', tone: 'pending' },
-  { key: 'skipped', label: 'Skipped', tone: 'pending' },
-];
-
-/** Index Checker scans filter by index result instead. */
-const INDEX_GROUPS: { key: RowFilterGroup; label: string; tone?: string; sub?: boolean }[] = [
-  { key: 'all', label: 'All' },
-  ...INDEX_STATUSES.map((s) => ({
-    key: INDEX_GROUP[s],
-    label: INDEX_STATUS_INFO[s].label,
-    tone: INDEX_STATUS_INFO[s].tone,
-  })),
-  { key: 'waiting', label: 'Waiting', tone: 'pending' },
-  { key: 'skipped', label: 'Skipped', tone: 'pending' },
-];
 
 interface Props {
   filters: RowFilters;

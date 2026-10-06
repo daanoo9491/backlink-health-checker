@@ -26,6 +26,7 @@ import { STATUS_INFO, type LinkStatus } from '../../shared/status';
 import { INVALID_REASON_TEXT, type InvalidReason } from '../../shared/url';
 import { api, RequestError } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ExportPanel } from '../components/ExportPanel';
 import { RowFilterBar } from '../components/RowFilterBar';
 import { ScanStatusBadge } from '../components/ScanStatusBadge';
 import { SheetsTable } from '../components/SheetsTable';
@@ -559,6 +560,8 @@ export function ScanPage() {
           )}
         </section>
       )}
+
+      {scan.status !== 'uploading' && <ExportPanel scan={scan} filters={filters} matching={rows ? rows.total : null} />}
 
       <section aria-labelledby="rows-heading">
         <div className="section-head">

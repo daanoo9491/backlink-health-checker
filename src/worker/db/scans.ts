@@ -145,7 +145,7 @@ const category = (key: string) => ISSUE_CATEGORIES.find((c) => c.key === key)!.s
  * A link waiting for an automatic retry is only in "waiting", so the groups
  * don't overlap and add up.
  */
-const GROUP_SQL: Record<Exclude<RowFilterGroup, 'all'>, string> = {
+export const GROUP_SQL: Record<Exclude<RowFilterGroup, 'all'>, string> = {
   active: `u.status = 'ACTIVE'`,
   dead: `u.status IN (${inList(category('dead'))})`,
   redirected: `u.status = 'REDIRECTED'`,
@@ -187,14 +187,14 @@ function orderBy(sort: RowSort, dir: SortDir, tool: ScanTool): string {
   }
 }
 
-const FROM = `FROM scan_rows r LEFT JOIN unique_urls u ON u.scan_id = r.scan_id AND u.url_index = r.url_index`;
+export const FROM = `FROM scan_rows r LEFT JOIN unique_urls u ON u.scan_id = r.scan_id AND u.url_index = r.url_index`;
 
 /**
  * WHERE clause for everything except the status group, so the group buttons
  * can show counts that respect the other filters. User input is always a
  * bound parameter; strpos() makes % and _ in the search text literal.
  */
-function baseWhere(scanId: string, f: RowFilters): { sql: string; params: unknown[] } {
+export function baseWhere(scanId: string, f: RowFilters): { sql: string; params: unknown[] } {
   const params: unknown[] = [scanId];
   const p = (v: unknown) => {
     params.push(v);

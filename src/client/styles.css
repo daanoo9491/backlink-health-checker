@@ -1575,3 +1575,18 @@ a:hover {
   padding: 0.2rem 0.45rem;
   border-radius: var(--radius-s);
 }
+
+/* Phase 11: download the results */
+.export-scope {
+  border: 0;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.export-scope label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  overflow-wrap: anywhere;
+}
