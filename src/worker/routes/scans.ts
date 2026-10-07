@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 import {
   ROW_FILTER_GROUPS,
   ROW_SORTS,
+  SCAN_NAME_MAX,
   type CreateScanResponse,
   type ExportPageResponse,
   type IndexCheckFromScanResponse,
@@ -28,7 +29,7 @@ import { requireAuth } from '../middleware/auth';
 import { exportRows } from '../db/export';
 import { getScan, listRows, listScans, toDetail, toSummary } from '../db/scans';
 import { pauseChecking, startChecking } from '../queue';
-import { parseAddRows, parseAddUrls, parseCreateScan, ValidationError } from '../validation';
+import { parseAddRows, parseAddUrls, parseCreateScan, parseRename, ValidationError } from '../validation';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
@@ -48,6 +49,9 @@ export const scanRoutes = new Hono<AppContext>();
 scanRoutes.use('*', requireAuth());
 
 scanRoutes.onError((err, c) => {
+  if (err instanceof ValidationError && err.message === 'fileName') {
+    return apiError(c, 400, 'INVALID_NAME', `Enter a name of 1 to ${SCAN_NAME_MAX} characters.`);
+  }
   if (err instanceof ValidationError) {
     return apiError(
       c,
@@ -281,6 +285,19 @@ function readFilters(q: Record<string, string>): RowFilters {
     dir: q.dir === 'desc' ? 'desc' : 'asc',
   };
 }
+
+/** Renames a scan or index check. Only the name shown in the app changes. */
+scanRoutes.patch('/:id', async (c) => {
+  const db = c.get('db');
+  const scan = await getScan(db, c.get('user')!.id, c.req.param('id'));
+  if (!scan) return apiError(c, 404, 'NOT_FOUND', 'This scan doesn’t exist, or it was deleted.');
+  const fileName = parseRename(await readJson(c.req.raw));
+  const [saved] = await db.query<typeof scan>('UPDATE scans SET file_name = $2 WHERE id = $1 RETURNING *', [
+    scan.id,
+    fileName,
+  ]);
+  return c.json(toDetail(saved ?? scan));
+});
 
 scanRoutes.delete('/:id', async (c) => {
   const scan = await getScan(c.get('db'), c.get('user')!.id, c.req.param('id'));

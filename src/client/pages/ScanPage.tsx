@@ -26,6 +26,7 @@ import { STATUS_INFO, type LinkStatus } from '../../shared/status';
 import { INVALID_REASON_TEXT, type InvalidReason } from '../../shared/url';
 import { api, RequestError } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { RenameDialog } from '../components/RenameDialog';
 import { ExportPanel } from '../components/ExportPanel';
 import { RowFilterBar } from '../components/RowFilterBar';
 import { ScanStatusBadge } from '../components/ScanStatusBadge';
@@ -117,6 +118,7 @@ export function ScanPage() {
     );
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
@@ -338,9 +340,14 @@ export function ScanPage() {
     <div className="stack-lg">
       <section className="scan-head" aria-labelledby="scan-title">
         <div>
-          <h2 id="scan-title" className="scan-title">
-            {scan.fileName}
-          </h2>
+          <div className="scan-title-row">
+            <h2 id="scan-title" className="scan-title">
+              {scan.fileName}
+            </h2>
+            <button type="button" className="button button-quiet button-small" onClick={() => setRenaming(true)}>
+              Rename
+            </button>
+          </div>
           <p className="scan-meta">
             Uploaded {formatDate(scan.createdAt)} · {formatBytes(scan.fileSize)} · {scan.worksheets}{' '}
             {scan.worksheets === 1 ? 'worksheet' : 'worksheets'}
@@ -670,6 +677,17 @@ export function ScanPage() {
           Delete this scan
         </button>
       </section>
+
+      <RenameDialog
+        key={renaming ? 'open' : 'closed'}
+        scan={renaming ? scan : null}
+        noun={isIndex ? 'index check' : 'scan'}
+        onCancel={() => setRenaming(false)}
+        onRenamed={(u) => {
+          setScan((prev) => (prev ? { ...prev, fileName: u.fileName } : prev));
+          setRenaming(false);
+        }}
+      />
 
       <ConfirmDialog
         open={confirmDelete}

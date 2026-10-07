@@ -1590,3 +1590,20 @@ a:hover {
   align-items: baseline;
   overflow-wrap: anywhere;
 }
+
+/* Rename a scan */
+.dialog-rename {
+  width: min(460px, calc(100vw - 2rem));
+}
+.dialog-rename .field input {
+  width: 100%;
+}
+.scan-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+.scan-title-row .scan-title {
+  overflow-wrap: anywhere;
+}

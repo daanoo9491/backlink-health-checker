@@ -4,6 +4,7 @@ import type { ScanListResponse, ScanSummary } from '../../shared/api';
 import { LINK_STATUSES, STATUS_INFO } from '../../shared/status';
 import { api, RequestError } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { RenameDialog } from '../components/RenameDialog';
 import { ScanStatusBadge } from '../components/ScanStatusBadge';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatDate, formatNumber } from '../lib/format';
@@ -17,6 +18,7 @@ export function ScanHistoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<ScanSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [toRename, setToRename] = useState<ScanSummary | null>(null);
   const [notice, setNotice] = useState<string | null>(deletedName ? `“${deletedName}” was deleted.` : null);
 
   useEffect(() => {
@@ -127,6 +129,14 @@ export function ScanHistoryPage() {
                     <button
                       type="button"
                       className="button button-quiet button-small"
+                      onClick={() => setToRename(s)}
+                      aria-label={`Rename ${s.fileName}`}
+                    >
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-quiet button-small"
                       onClick={() => setToDelete(s)}
                       aria-label={`Delete ${s.fileName}`}
                     >
@@ -155,6 +165,18 @@ export function ScanHistoryPage() {
           ))}
         </dl>
       </section>
+
+      <RenameDialog
+        key={toRename?.id ?? 'closed'}
+        scan={toRename}
+        noun="scan"
+        onCancel={() => setToRename(null)}
+        onRenamed={(u) => {
+          setScans((list) => list?.map((x) => (x.id === u.id ? { ...x, fileName: u.fileName } : x)) ?? null);
+          setNotice(`Renamed to “${u.fileName}”.`);
+          setToRename(null);
+        }}
+      />
 
       <ConfirmDialog
         open={toDelete !== null}

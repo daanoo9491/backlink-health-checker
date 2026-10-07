@@ -70,6 +70,12 @@ export interface CreateScanRequest {
   blankRows: number;
 }
 
+/** Rename a scan or index check (only its display name changes). */
+export interface RenameScanRequest {
+  fileName: string;
+}
+export const SCAN_NAME_MAX = 120;
+
 export interface CreateScanResponse {
   id: string;
 }

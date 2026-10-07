@@ -9,7 +9,7 @@ An internal tool for our Marketing team, with two tools behind one sign-in:
 
 The app runs on Cloudflare; data is stored in Supabase Postgres.
 
-> **Current status: Phase 11 (Excel/CSV download).** Every scan and index check has **Download the results**: an Excel file (Results + Summary sheets) or a CSV with every original column of the uploaded file followed by the results (link status, HTTP code, final URL, page title, index status, where the answer came from, evidence, dates). Download all rows or only the rows matching the current filters. The file is built in the browser, so it works on the free plan even for 20,000 rows.
+> **Current status: Phase 11 (Excel/CSV download).** Every scan and index check has **Download the results**: an Excel file (Results + Summary sheets) or a CSV with every original column of the uploaded file followed by the results (link status, HTTP code, final URL, page title, index status, where the answer came from, evidence, dates). Download all rows or only the rows matching the current filters. The file is built in the browser, so it works on the free plan even for 20,000 rows. Scans and index checks can be **renamed** (Rename in Scan history, Index checks, or next to the title on a scan); downloads use the new name.
 >
 > **Phase 10 (Google check through the browser helper).** A small Chrome extension (`extension/`, downloadable from Settings) searches Google for each link of an index check from a team member's own browser, at a person's pace, and fills in **Indexed / Not indexed** for any website, with no API key and no Search Console. See _Browser helper_ below.
 >

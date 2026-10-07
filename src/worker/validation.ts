@@ -7,6 +7,7 @@ import {
   SCAN_LIMITS,
   type AddRowsRequest,
   type AddUrlsRequest,
+  SCAN_NAME_MAX,
   type CreateScanRequest,
   type ScanRowInput,
   type SheetInfo,
@@ -131,4 +132,18 @@ function parseRow(v: unknown, uniqueTotal: number): ScanRowInput {
     row.cells[clean(k)] = clean(val as string).slice(0, SCAN_LIMITS.maxCellLength);
   }
   return row;
+}
+
+/**
+ * A new display name: trimmed, inner spaces and line breaks collapsed, control
+ * characters removed. 1–SCAN_NAME_MAX characters after cleaning.
+ */
+export function parseRename(body: unknown): string {
+  if (!isObj(body) || typeof body.fileName !== 'string' || body.fileName.length > 1000) fail('fileName');
+  const name = (body as { fileName: string }).fileName
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return name.length >= 1 && [...name].length <= SCAN_NAME_MAX ? name : fail('fileName');
 }

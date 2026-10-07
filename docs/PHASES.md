@@ -217,3 +217,9 @@ Changed from the plan (paid search-data provider) at the team's request: no API,
 
 - Very large files (the 20,000-row maximum) take a few seconds to collect (80 small requests); the panel shows progress and can be cancelled.
 - Hyperlinks in the original workbook are exported as their text (the address), not as clickable links.
+
+## Phase 11 follow-up: rename scans (0.13.1)
+
+- **Rename** in Scan history, the Index checks list and next to a scan's title. A small dialog (native `<dialog>`: Enter saves, Esc cancels, the old name is pre-selected).
+- `PATCH /api/scans/:id` with `{ fileName }`: owner only (another user's scan is “not found”), signed in, same-origin (the CSRF check covers PATCH). The name is trimmed, spaces and line breaks collapsed, control characters removed, 1–120 characters (`SCAN_NAME_MAX`); otherwise a plain “Enter a name of 1 to 120 characters.” Only `file_name` changes; results, counters and status are untouched (tested).
+- Downloads (Phase 11) use the new name for the file name and the Summary sheet.
