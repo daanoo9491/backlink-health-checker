@@ -176,3 +176,14 @@ describe('checkLink reads the page', () => {
     });
   });
 });
+
+describe('Windows-1252 pages', () => {
+  it('decode smart quotes, dashes, € and … the same on every Node.js version', async () => {
+    const { decodeWindows1252 } = await import('../../src/worker/checker/page-reader');
+    const bytes = new Uint8Array([0x93, 0x68, 0x69, 0x94, 0x20, 0x96, 0x20, 0x80, 0x35, 0x85, 0x20, 0xe9, 0x81]);
+    expect(decodeWindows1252(bytes)).toBe('“hi” – €5… é\u0081');
+    // Long pages are decoded in chunks without losing anything.
+    const long = new Uint8Array(20_000).fill(0x99);
+    expect(decodeWindows1252(long)).toBe('™'.repeat(20_000));
+  });
+});

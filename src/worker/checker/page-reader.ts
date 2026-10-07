@@ -44,7 +44,52 @@ export function charsetFromMeta(head: Uint8Array): string | null {
   return m ? m[1]!.toLowerCase() : null;
 }
 
+/**
+ * Every label the web standard maps to Windows-1252 (latin1 and ascii
+ * included). Decoded by hand: some Node.js versions decode it as plain
+ * ISO-8859-1, turning “smart quotes”, € and … (bytes 0x80–0x9F) into
+ * invisible control characters.
+ */
+const WINDOWS_1252_LABELS = new Set([
+  'ansi_x3.4-1968',
+  'ascii',
+  'cp1252',
+  'cp819',
+  'csisolatin1',
+  'ibm819',
+  'iso-8859-1',
+  'iso-ir-100',
+  'iso8859-1',
+  'iso88591',
+  'iso_8859-1',
+  'iso_8859-1:1987',
+  'l1',
+  'latin1',
+  'us-ascii',
+  'windows-1252',
+  'x-cp1252',
+]);
+/** Bytes 0x80–0x9F in Windows-1252 (the five unassigned ones stay as they are). */
+const CP1252_HIGH = [
+  0x20ac, 0x81, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8d, 0x017d,
+  0x8f, 0x90, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0x9d,
+  0x017e, 0x0178,
+];
+
+export function decodeWindows1252(bytes: Uint8Array): string {
+  const parts: string[] = [];
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const codes = Array.from(bytes.subarray(i, i + CHUNK), (b) =>
+      b >= 0x80 && b <= 0x9f ? CP1252_HIGH[b - 0x80]! : b,
+    );
+    parts.push(String.fromCharCode(...codes));
+  }
+  return parts.join('');
+}
+
 function decode(bytes: Uint8Array, charset: string | null): string {
+  if (charset && WINDOWS_1252_LABELS.has(charset.trim().toLowerCase())) return decodeWindows1252(bytes);
   if (charset) {
     try {
       return new TextDecoder(charset).decode(bytes);

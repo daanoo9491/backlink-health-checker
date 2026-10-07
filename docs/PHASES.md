@@ -223,3 +223,8 @@ Changed from the plan (paid search-data provider) at the team's request: no API,
 - **Rename** in Scan history, the Index checks list and next to a scan's title. A small dialog (native `<dialog>`: Enter saves, Esc cancels, the old name is pre-selected).
 - `PATCH /api/scans/:id` with `{ fileName }`: owner only (another user's scan is “not found”), signed in, same-origin (the CSRF check covers PATCH). The name is trimmed, spaces and line breaks collapsed, control characters removed, 1–120 characters (`SCAN_NAME_MAX`); otherwise a plain “Enter a name of 1 to 120 characters.” Only `file_name` changes; results, counters and status are untouched (tested).
 - Downloads (Phase 11) use the new name for the file name and the Summary sheet.
+
+## Fix (0.13.2): Windows-1252 pages on newer Node.js
+
+- Some Node.js versions decode `windows-1252` (and its aliases latin1 / iso-8859-1 / ascii) as plain ISO-8859-1, so bytes 0x80–0x9F (“smart quotes”, –, €, …, ™) became invisible control characters. This broke a page-reader test on a Windows PC; Cloudflare's runtime was not affected.
+- `page-reader.ts` now decodes every label the web standard maps to Windows-1252 itself (`decodeWindows1252`), so page titles and soft-404 text read the same everywhere. Tested, including long pages.
