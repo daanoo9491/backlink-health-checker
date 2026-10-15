@@ -155,6 +155,19 @@ Each prints an `id`. Paste them into `wrangler.jsonc`, replacing `PASTE-PRODUCTI
 
 **5. Cloudflare API token:** add **Account → Hyperdrive → Edit** and **Account → Queues → Edit** to the token GitHub uses (the D1 permission is no longer needed).
 
+### Moving staging data to production (one-off)
+
+Copies every scan and index check (rows, links, results, evidence) from the staging Supabase project to the production one. Deploy production first, so both databases have the same tables. In PowerShell:
+
+```powershell
+$env:FROM_DATABASE_URL="<staging Session pooler string>"
+$env:TO_DATABASE_URL="<production Session pooler string>"
+npm run db:copy -- --dry-run   # lists what would be copied
+npm run db:copy                # copies
+```
+
+It only adds: nothing on production is changed or deleted, and running it again skips what was already copied. Each scan is copied in one transaction with a count check. Users are matched by email. A scan that was still checking arrives as **Paused** (press Resume). Not copied: browser-helper connection codes (create a new one on production), sign-in throttling, Search Console usage and the robots.txt cache.
+
 ### Queue setup (once, Phase 5)
 
 Checking runs in the background on Cloudflare Queues (included in the free plan: 10,000 operations a day, about 3 per batch of 8 links, so roughly 25,000 links a day). Create the two queues once:
