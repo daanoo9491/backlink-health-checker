@@ -1,2 +1,2 @@
 // Bump with each release. CI can overwrite this with the Git SHA later.
-export const APP_VERSION = '0.13.3';
+export const APP_VERSION = '0.14.0';

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Copies every scan and index check from one Supabase database to another
- * (staging -> production), with all rows, links, results and evidence.
+ * Copies every scan and index check from one Supabase database (FROM) into
+ * another (TO), with all rows, links, results and evidence. Used to bring the
+ * old production project's scans into the live database before deleting it.
  *
- *   $env:FROM_DATABASE_URL="<staging Session pooler string>"
- *   $env:TO_DATABASE_URL="<production Session pooler string>"
+ *   $env:FROM_DATABASE_URL="<Session pooler string of the database to copy from>"
+ *   $env:TO_DATABASE_URL="<Session pooler string of the database to copy into>"
  *   npm run db:copy -- --dry-run   # shows what would be copied, writes nothing
  *   npm run db:copy                # copies
  *
@@ -13,12 +14,13 @@
  * - Each scan is copied in one transaction and its counts are checked before
  *   it is saved, so a failure never leaves half a scan behind.
  * - Users are matched by email, so scans attach to the account you already
- *   use on production.
+ *   already use on the target.
  * - A scan that was checking is copied as "Paused": press Resume on
- *   production to carry on. Unfinished uploads are left out.
+ *   the target to carry on. Unfinished uploads are left out.
  * - Not copied: browser-helper connection codes (create a new one on
- *   production), sign-in throttling, Search Console usage, robots.txt cache.
- * - Both databases must be on the same migrations: deploy production first.
+ *   the target), sign-in throttling, Search Console usage, robots.txt cache.
+ * - The target must have every migration the source has (it may have more:
+ *   newer columns simply get their defaults).
  */
 import pg from 'pg';
 
@@ -31,8 +33,8 @@ const ROW_PAGE = 1000;
 if (!fromUrl || !toUrl) {
   console.error(
     'Set both connection strings first:\n' +
-      '  $env:FROM_DATABASE_URL="<staging Session pooler string>"\n' +
-      '  $env:TO_DATABASE_URL="<production Session pooler string>"',
+      '  $env:FROM_DATABASE_URL="<database to copy from>"\n' +
+      '  $env:TO_DATABASE_URL="<database to copy into>"',
   );
   process.exit(1);
 }
@@ -48,7 +50,7 @@ function identity(url) {
   }
 }
 if (identity(fromUrl) === identity(toUrl)) {
-  console.error('FROM and TO are the same database. TO must be the production project.');
+  console.error('FROM and TO are the same database. Use two different Supabase projects.');
   process.exit(1);
 }
 
@@ -60,8 +62,23 @@ const sslFor = (url) =>
 const from = new pg.Client({ connectionString: fromUrl, ssl: sslFor(fromUrl) });
 const to = new pg.Client({ connectionString: toUrl, ssl: sslFor(toUrl) });
 
-/** Target columns of a table, in order (the source must have the same ones). */
+/**
+ * Columns to copy: those both databases have (the target may be newer; its
+ * extra columns get their defaults). Generated identity columns are left out.
+ */
 async function columns(table) {
+  const src = new Set(
+    (
+      await from.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1`,
+        [table],
+      )
+    ).rows.map((r) => r.column_name),
+  );
+  return (await targetColumns(table)).filter((c) => src.has(c));
+}
+
+async function targetColumns(table) {
   const { rows } = await to.query(
     `SELECT column_name, is_generated, identity_generation FROM information_schema.columns
      WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position`,
@@ -98,12 +115,10 @@ try {
   const missing = mFrom.filter((m) => !mTo.includes(m));
   if (missing.length) {
     throw new Error(
-      `Production's database is behind staging (missing ${missing.join(', ')}).\n` +
-        'Deploy production first (git push origin development:main), wait for it to finish, then run this again.',
+      `The target (TO) database is missing updates the source has (${missing.join(', ')}).\n` +
+        'Deploy the app that uses the target database first, wait for it to finish, then run this again.',
     );
   }
-  const extra = mTo.filter((m) => !mFrom.includes(m));
-  if (extra.length) throw new Error(`Staging's database is behind production (missing ${extra.join(', ')}).`);
 
   const users = (await from.query('SELECT * FROM users ORDER BY created_at')).rows;
   const scans = (await from.query(`SELECT * FROM scans WHERE status <> 'uploading' ORDER BY created_at, id`)).rows;
@@ -112,20 +127,20 @@ try {
   );
   const todo = scans.filter((s) => !already.has(s.id));
 
-  console.log(`Staging has ${users.length} user(s) and ${scans.length} saved scan(s)/index check(s).`);
+  console.log(`The source (FROM) has ${users.length} user(s) and ${scans.length} saved scan(s)/index check(s).`);
   for (const s of scans) {
     const kind = s.tool === 'index' ? 'index check' : 'scan';
     const mark = already.has(s.id) ? '=' : '+';
     console.log(`  ${mark} ${s.file_name}  (${kind}, ${s.total_rows} rows, ${s.unique_urls} links, ${s.status})`);
   }
-  console.log(`\n${todo.length} to copy, ${already.size} already on production (= skipped).`);
+  console.log(`\n${todo.length} to copy, ${already.size} already on the target (= skipped).`);
 
   if (dryRun) {
     console.log('\nDry run: nothing was written.');
   } else if (todo.length === 0) {
     console.log('Nothing to copy.');
   } else {
-    // Users: matched by email; production keeps its own id for an account it already has.
+    // Users: matched by email; the target keeps its own id for an account it already has.
     const userIds = new Map();
     for (const u of users) {
       const { rows } = await to.query(
@@ -222,7 +237,7 @@ try {
         throw new Error(`${s.file_name}: ${e.message}`, { cause: e });
       }
     }
-    console.log(`\n✅ Done. Copied ${copied} scan(s)/index check(s) to production.`);
+    console.log(`\n✅ Done. Copied ${copied} scan(s)/index check(s) to the target.`);
   }
 } catch (e) {
   console.error(

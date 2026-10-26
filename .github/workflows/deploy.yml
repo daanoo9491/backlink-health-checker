@@ -1,19 +1,22 @@
 name: Deploy
 
-# development -> staging Worker, main -> production Worker.
+# development -> the live Worker (backlink-health-checker-staging).
+# There is no separate production Worker any more (retired in 0.14.0), so
+# pushes to main run CI only and deploy nothing.
 on:
   push:
-    branches: [main, development]
+    branches: [development]
   workflow_dispatch:
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy
   cancel-in-progress: false
 
 jobs:
   deploy:
+    if: github.ref_name == 'development'
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    environment: staging
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,16 +28,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-      - name: Check the Hyperdrive IDs are filled in
-        run: |
-          if grep -q "PASTE-.*-HYPERDRIVE-ID-HERE" wrangler.jsonc; then
-            echo "::error::wrangler.jsonc still has a placeholder Hyperdrive id. Create the Hyperdrive configs and paste their ids (see README → Database setup)."
-            exit 1
-          fi
-
-      # Supabase "Session pooler" connection strings, stored as GitHub secrets.
-      - name: Apply database migrations (staging)
-        if: github.ref_name != 'main'
+      # The Supabase "Session pooler" connection string, stored as a GitHub secret.
+      - name: Apply database migrations
         run: |
           if [ -z "$DATABASE_URL" ]; then
             echo "::error::Add the SUPABASE_DB_URL_STAGING secret (README → Database setup)."; exit 1
@@ -42,24 +37,8 @@ jobs:
           npm run db:migrate
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL_STAGING }}
-      - name: Apply database migrations (production)
-        if: github.ref_name == 'main'
-        run: |
-          if [ -z "$DATABASE_URL" ]; then
-            echo "::error::Add the SUPABASE_DB_URL_PRODUCTION secret (README → Database setup)."; exit 1
-          fi
-          npm run db:migrate
-        env:
-          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL_PRODUCTION }}
 
-      - name: Build (staging)
-        if: github.ref_name != 'main'
-        run: npm run build
-        env:
-          CLOUDFLARE_ENV: staging
-      - name: Build (production)
-        if: github.ref_name == 'main'
-        run: npm run build
+      - run: npm run build
 
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@v3

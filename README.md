@@ -9,6 +9,8 @@ An internal tool for our Marketing team, with two tools behind one sign-in:
 
 The app runs on Cloudflare; data is stored in Supabase Postgres.
 
+> **One live app (since 0.14.0).** There is a single Worker, `backlink-health-checker-staging` (it kept its name so its address, sign-in and data didn't change), with one Supabase project (`bhc-staging`) and one queue (`bhc-checks-staging`). Pushing `development` deploys it. The separate production Worker, its Supabase project, Hyperdrive config and queue, and the old D1 databases were retired; see _Retiring the old production setup_ below.
+
 > **Current status: Phase 11 (Excel/CSV download).** Every scan and index check has **Download the results**: an Excel file (Results + Summary sheets) or a CSV with every original column of the uploaded file followed by the results (link status, HTTP code, final URL, page title, index status, where the answer came from, evidence, dates). Download all rows or only the rows matching the current filters. The file is built in the browser, so it works on the free plan even for 20,000 rows. Scans and index checks can be **renamed** (Rename in Scan history, Index checks, or next to the title on a scan); downloads use the new name.
 >
 > **Phase 10 (Google check through the browser helper).** A small Chrome extension (`extension/`, downloadable from Settings) searches Google for each link of an index check from a team member's own browser, at a person's pace, and fills in **Indexed / Not indexed** for any website, with no API key and no Search Console. See _Browser helper_ below.
@@ -95,21 +97,21 @@ npm run dev                      # http://localhost:5173
 | `npm run typecheck`               | TypeScript, no emit                                  |
 | `npm test`                        | Vitest                                               |
 | `npm run check`                   | Lint + typecheck + test + build (run before pushing) |
-| `npm run deploy`                  | Build and deploy to **production**                   |
-| `npm run deploy:staging`          | Build and deploy to **staging**                      |
+| `npm run deploy`                  | Build and deploy the live Worker                     |
+| `npm run db:copy`                 | Copy scans between two Supabase databases (one-off)  |
 
 ## Environment configuration
 
-| Where                     | What                                            | How                                                              |
-| ------------------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
-| `wrangler.jsonc` → `vars` | Non-secret settings (`APP_ENV`, `APP_NAME`)     | Committed                                                        |
-| `.dev.vars`               | Local Worker secrets                            | Not committed; copy from `.dev.vars.example`                     |
-| Cloudflare secrets        | Production Worker secrets                       | `npx wrangler secret put NAME` (add `--env staging` for staging) |
-| GitHub Actions secrets    | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Repo → Settings → Secrets and variables → Actions                |
+| Where                     | What                                            | How                                               |
+| ------------------------- | ----------------------------------------------- | ------------------------------------------------- |
+| `wrangler.jsonc` → `vars` | Non-secret settings (`APP_ENV`, `APP_NAME`)     | Committed                                         |
+| `.dev.vars`               | Local Worker secrets                            | Not committed; copy from `.dev.vars.example`      |
+| Cloudflare secrets        | Worker secrets                                  | `npx wrangler secret put NAME`                    |
+| GitHub Actions secrets    | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Repo → Settings → Secrets and variables → Actions |
 
 ### Sign-in secrets (required from Phase 1)
 
-Each Worker (production **and** staging) needs three secrets. In Cloudflare: **Workers & Pages** → the Worker → **Settings** → **Variables and Secrets** → **Add** → type **Secret**.
+The Worker needs three secrets. In Cloudflare: **Workers & Pages** → the Worker → **Settings** → **Variables and Secrets** → **Add** → type **Secret**.
 
 | Name             | Value                                        |
 | ---------------- | -------------------------------------------- |
@@ -117,20 +119,19 @@ Each Worker (production **and** staging) needs three secrets. In Cloudflare: **W
 | `AUTH_PASSWORD`  | The sign-in password (use a strong one)      |
 | `SESSION_SECRET` | 32+ random characters — run `npm run secret` |
 
-Or from the terminal: `npx wrangler secret put AUTH_EMAIL` (add `--env staging` for staging). Secrets survive deploys. Until they are set, the login page says sign-in isn't set up. Phase 3 replaces this single account with a users table.
+Or from the terminal: `npx wrangler secret put AUTH_EMAIL`. Secrets survive deploys. Until they are set, the login page says sign-in isn't set up. Phase 3 replaces this single account with a users table.
 
 **Never commit** `.env`, `.dev.vars`, API keys or tokens. `.gitignore` blocks them and CI fails if one is tracked.
 
 ## Cloudflare setup
 
 1. Log in: `npx wrangler login`
-2. First deploy: `npm run deploy` → creates Worker `backlink-health-checker` at `https://backlink-health-checker.<your-subdomain>.workers.dev`
-3. Staging: `npm run deploy:staging` → creates `backlink-health-checker-staging`
-4. Verify: open `/api/health` on the deployed URL — it should return `{"status":"ok", ...}`
+2. Deploy: `npm run deploy` → Worker `backlink-health-checker-staging` at `https://backlink-health-checker-staging.<your-subdomain>.workers.dev`
+3. Verify: open `/api/health` on the deployed URL — it should return `{"status":"ok", ...}`
 
 ### Database setup (once): Supabase + Hyperdrive
 
-Production and staging each get their own Supabase project (the free plan allows two), so test data never touches production.
+Since 0.14.0 the app uses one Supabase project, `bhc-staging`. The steps below describe the original two-project setup; only the staging parts still apply.
 
 **1. Create the Supabase projects.** At supabase.com: **New project** → name `bhc-production` → choose a strong database password (save it in your password manager) → pick the region nearest your users. Repeat for `bhc-staging`.
 
@@ -155,25 +156,31 @@ Each prints an `id`. Paste them into `wrangler.jsonc`, replacing `PASTE-PRODUCTI
 
 **5. Cloudflare API token:** add **Account → Hyperdrive → Edit** and **Account → Queues → Edit** to the token GitHub uses (the D1 permission is no longer needed).
 
-### Moving staging data to production (one-off)
+### Retiring the old production setup (0.14.0)
 
-Copies every scan and index check (rows, links, results, evidence) from the staging Supabase project to the production one. Deploy production first, so both databases have the same tables. In PowerShell:
+Done once, in this order, after 0.14.0 is deployed (so nothing deploys to production any more):
 
-```powershell
-$env:FROM_DATABASE_URL="<staging Session pooler string>"
-$env:TO_DATABASE_URL="<production Session pooler string>"
-npm run db:copy -- --dry-run   # lists what would be copied
-npm run db:copy                # copies
-```
+1. **Keep production's scans (optional):** copy them into the live database first. Scans already there are skipped; nothing in the live database is changed.
+   ```powershell
+   $env:FROM_DATABASE_URL="<bhc-production Session pooler string>"
+   $env:TO_DATABASE_URL="<bhc-staging Session pooler string>"
+   npm run db:copy -- --dry-run
+   npm run db:copy
+   ```
+2. Cloudflare → **Workers & Pages** → `backlink-health-checker` → **Settings** → **Delete**.
+3. Cloudflare → **Queues** → `bhc-checks` → **Delete**.
+4. Cloudflare → **Hyperdrive** → `bhc-production` → **Delete**.
+5. Cloudflare → **D1** → `backlink-health-checker-db` and `backlink-health-checker-db-staging` → **Delete** (unused since Phase 5).
+6. Supabase → project `bhc-production` → **Project Settings** → **General** → **Delete project**.
+7. GitHub → repo **Settings** → **Secrets and variables** → **Actions**: delete `SUPABASE_DB_URL_PRODUCTION`; **Environments**: delete `production`.
 
-It only adds: nothing on production is changed or deleted, and running it again skips what was already copied. Each scan is copied in one transaction with a count check. Users are matched by email. A scan that was still checking arrives as **Paused** (press Resume). Not copied: browser-helper connection codes (create a new one on production), sign-in throttling, Search Console usage and the robots.txt cache.
+`npm run db:copy` copies every scan and index check (rows, links, results, evidence) from one Supabase database to another. It only adds, skips what's already there, copies each scan in one transaction with a count check, matches users by email, and brings scans that were checking across as **Paused**. The target must have every database update the source has (it may have more). Not copied: browser-helper connection codes, sign-in throttling, Search Console usage, robots.txt cache.
 
 ### Queue setup (once, Phase 5)
 
 Checking runs in the background on Cloudflare Queues (included in the free plan: 10,000 operations a day, about 3 per batch of 8 links, so roughly 25,000 links a day). Create the two queues once:
 
 ```bash
-npx wrangler queues create bhc-checks
 npx wrangler queues create bhc-checks-staging
 ```
 
@@ -215,11 +222,10 @@ Lets the Index Checker show Google's own answer for **your** sites. Without it, 
 6. **Store the key as a secret** (PowerShell, in the project folder):
 
    ```powershell
-   Get-Content "C:\path\to\key.json" -Raw | npx wrangler secret put GSC_SERVICE_ACCOUNT --env staging
    Get-Content "C:\path\to\key.json" -Raw | npx wrangler secret put GSC_SERVICE_ACCOUNT
    ```
 
-   (first line staging, second production). Then delete the downloaded file or keep it somewhere safe; never commit it.
+   Then delete the downloaded file or keep it somewhere safe; never commit it.
 
 7. **Check:** Settings → Google Search Console lists your sites and today's usage.
 
@@ -237,18 +243,18 @@ If your Google Workspace blocks service-account keys (“key creation is disable
    git push -u origin development
    ```
 3. Create a Cloudflare API token: Cloudflare dashboard → My Profile → API Tokens → **Create Token** → template **Edit Cloudflare Workers**, then add **Account → Hyperdrive → Edit** and **Account → Queues → Edit**.
-4. Add repo secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `SUPABASE_DB_URL_PRODUCTION` and `SUPABASE_DB_URL_STAGING` (Account ID is on the Workers & Pages overview page).
+4. Add repo secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and `SUPABASE_DB_URL_STAGING` (Account ID is on the Workers & Pages overview page).
 5. Optional but recommended: Settings → Branches → protect `main` and require the **CI / check** status to pass.
 
 ## Branching and deployment
 
-| Branch               | Purpose               | Deploys to        |
-| -------------------- | --------------------- | ----------------- |
-| `main`               | Production            | Production Worker |
-| `development`        | Integration / staging | Staging Worker    |
-| `feature/*`, `fix/*` | Work in progress      | — (CI runs on PR) |
+| Branch               | Purpose                  | Deploys to                                          |
+| -------------------- | ------------------------ | --------------------------------------------------- |
+| `development`        | The live app             | `backlink-health-checker-staging` (the only Worker) |
+| `main`               | Optional copy / releases | Nothing (CI only)                                   |
+| `feature/*`, `fix/*` | Work in progress         | — (CI runs on PR)                                   |
 
-Flow: `feature/x` → PR into `development` → test on staging → PR `development` into `main` → production.
+Flow: apply a patch on `development` → `npm run check` → `git push` → the live app updates.
 
 ## Testing
 
