@@ -44,6 +44,7 @@ export interface ScanRecord {
   active_count: number;
   dead_count: number;
   soft_404_count: number;
+  suspended_count: number;
   redirected_count: number;
   blocked_count: number;
   error_count: number;
@@ -77,6 +78,7 @@ export function toSummary(r: ScanRecord): ScanSummary {
     activeCount: r.active_count,
     deadCount: r.dead_count,
     soft404Count: r.soft_404_count,
+    suspendedCount: r.suspended_count ?? 0,
     redirectedCount: r.redirected_count,
     blockedCount: r.blocked_count,
     errorCount: r.error_count,
@@ -148,6 +150,7 @@ const category = (key: string) => ISSUE_CATEGORIES.find((c) => c.key === key)!.s
 export const GROUP_SQL: Record<Exclude<RowFilterGroup, 'all'>, string> = {
   active: `u.status = 'ACTIVE'`,
   dead: `u.status IN (${inList(category('dead'))})`,
+  suspended: `u.status = 'SUSPENDED'`,
   redirected: `u.status = 'REDIRECTED'`,
   review: `u.status IN (${inList(REVIEW_STATUSES)}) AND u.retry_at IS NULL`,
   unreachable: `u.status IN (${inList(category('unreachable'))}) AND u.retry_at IS NULL`,

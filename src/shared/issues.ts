@@ -6,7 +6,7 @@
 import type { LinkStatus } from './status';
 import type { StatusTone } from './status';
 
-export const ISSUE_CATEGORY_KEYS = ['dead', 'unreachable', 'site_error', 'refused', 'redirected'] as const;
+export const ISSUE_CATEGORY_KEYS = ['dead', 'suspended', 'unreachable', 'site_error', 'refused', 'redirected'] as const;
 export type IssueCategoryKey = (typeof ISSUE_CATEGORY_KEYS)[number];
 
 export interface IssueCategory {
@@ -26,6 +26,14 @@ export const ISSUE_CATEGORIES: readonly IssueCategory[] = [
     tone: 'dead',
     advice:
       'The page was removed, or now shows a “not found” message or your visitors land on a home page. Ask the site owner to restore it, or replace the backlink.',
+  },
+  {
+    key: 'suspended',
+    label: 'Suspended / Unavailable',
+    statuses: ['SUSPENDED'],
+    tone: 'dead',
+    advice:
+      'The whole site shows a hosting notice (“Account Suspended”, “Website Expired”…) instead of its pages. It may come back if the owner pays their host; otherwise treat the backlink as lost.',
   },
   {
     key: 'unreachable',
@@ -71,6 +79,7 @@ export const REVIEW_STATUSES: readonly LinkStatus[] = [
 export const STATUS_SORT_ORDER: readonly LinkStatus[] = [
   'DEAD',
   'SOFT_404',
+  'SUSPENDED',
   'NETWORK_ERROR',
   'SERVER_ERROR',
   'TIMEOUT',

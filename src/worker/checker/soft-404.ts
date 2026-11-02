@@ -12,14 +12,20 @@
  */
 import type { LinkStatus } from '../../shared/status';
 import type { PageFacts } from './page-facts';
+import {
+  DEFAULT_RULES,
+  judgeSuspended,
+  judgeSuspendedRedirect,
+  SHORT_PAGE_CHARS,
+  type SuspensionRules,
+} from './suspended';
+
+export { SHORT_PAGE_CHARS };
 
 export interface PageVerdict {
-  status: Extract<LinkStatus, 'SOFT_404' | 'BLOCKED'>;
+  status: Extract<LinkStatus, 'SOFT_404' | 'BLOCKED' | 'SUSPENDED'>;
   reason: string;
 }
-
-/** A not-found sentence only counts on a page with at most this much text. */
-export const SHORT_PAGE_CHARS = 2_500;
 
 const raw = String.raw;
 /** Interjections allowed before the message: "Oops! Page not found". */
@@ -94,6 +100,8 @@ const ERROR_PATH =
 /** Verdicts from the addresses alone (no page content needed). */
 export function judgeRedirect(originalUrl: string, finalUrl: string): PageVerdict | null {
   if (originalUrl === finalUrl) return null;
+  const suspended = judgeSuspendedRedirect(originalUrl, finalUrl);
+  if (suspended) return { status: 'SUSPENDED', reason: suspended };
   const a = parse(originalUrl);
   const b = parse(finalUrl);
   if (!a || !b) return null;
@@ -119,7 +127,7 @@ export function judgeRedirect(originalUrl: string, finalUrl: string): PageVerdic
 }
 
 /** Verdicts from the page's content. */
-export function judgeContent(facts: PageFacts): PageVerdict | null {
+export function judgeContent(facts: PageFacts, rules: SuspensionRules = DEFAULT_RULES): PageVerdict | null {
   if (facts.title && BOT_CHECK_TITLE.test(facts.title.trim())) {
     return {
       status: 'BLOCKED',
@@ -132,6 +140,9 @@ export function judgeContent(facts: PageFacts): PageVerdict | null {
       reason: 'The site showed a bot check instead of the page. Open it yourself to confirm',
     };
   }
+  // A suspended site often has a "not found"-like page too: suspension is the more useful answer.
+  const suspended = judgeSuspended(facts, rules);
+  if (suspended) return { status: 'SUSPENDED', reason: suspended };
   if (isNotFoundLabel(facts.title)) {
     return { status: 'SOFT_404', reason: `The page loads, but its title says ${quote(facts.title!)}` };
   }
@@ -146,6 +157,11 @@ export function judgeContent(facts: PageFacts): PageVerdict | null {
 }
 
 /** Address rules first (a redirect to the home page shows a perfectly normal page). */
-export function judgePage(originalUrl: string, finalUrl: string, facts: PageFacts | null): PageVerdict | null {
-  return judgeRedirect(originalUrl, finalUrl) ?? (facts ? judgeContent(facts) : null);
+export function judgePage(
+  originalUrl: string,
+  finalUrl: string,
+  facts: PageFacts | null,
+  rules: SuspensionRules = DEFAULT_RULES,
+): PageVerdict | null {
+  return judgeRedirect(originalUrl, finalUrl) ?? (facts ? judgeContent(facts, rules) : null);
 }

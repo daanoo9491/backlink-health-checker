@@ -31,7 +31,7 @@ export function DashboardPage() {
         { label: 'Scans run', value: data.totalScans },
         { label: 'Links checked', value: data.urlsChecked },
         { label: 'Active links', value: data.activeLinks, tone: 'active' },
-        { label: 'Dead links', value: data.deadLinks, tone: 'dead' },
+        { label: 'Dead or suspended', value: data.deadLinks, tone: 'dead' },
         { label: 'Need a look', value: data.issuesFound, tone: 'review' },
       ]
     : [];

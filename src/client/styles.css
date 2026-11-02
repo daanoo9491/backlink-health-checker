@@ -1607,3 +1607,46 @@ a:hover {
 .scan-title-row .scan-title {
   overflow-wrap: anywhere;
 }
+
+/* Phase 12: suspended-site phrases */
+.rules-builtin {
+  margin: 0.75rem 0 1rem;
+}
+.rules-builtin summary {
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.rule-chips {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.rule-chips li {
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  background: var(--harbor-tint);
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+.rule-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.rule-form .field {
+  flex: 1 1 260px;
+}
+.rule-form .field input {
+  width: 100%;
+}
+.rule-form > .button {
+  margin-top: 1.85rem;
+}

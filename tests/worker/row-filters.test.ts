@@ -90,6 +90,7 @@ describe('row filters', () => {
       all: 7,
       active: 3, // A2, B4 (repeat of A2), B5
       dead: 1,
+      suspended: 0,
       redirected: 1,
       review: 1,
       unreachable: 0,

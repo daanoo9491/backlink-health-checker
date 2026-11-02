@@ -59,6 +59,13 @@ export function evaluateIndex({ link, page, robots }: IndexInputs): IndexResult 
       evidence: [{ signal: 'page', text: `Page gone: ${link.reason}`, bad: true }],
     };
   }
+  if (link.status === 'SUSPENDED') {
+    return {
+      status: 'NOT_REACHABLE',
+      reason: link.reason,
+      evidence: [{ signal: 'page', text: `Site suspended: ${link.reason}`, bad: true }],
+    };
+  }
   if (link.status === 'REDIRECTED') {
     const to = link.finalUrl ?? 'another address';
     return {

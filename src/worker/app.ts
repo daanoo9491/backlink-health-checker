@@ -12,6 +12,7 @@ import { authRoutes } from './routes/auth';
 import { dashboardRoutes } from './routes/dashboard';
 import { scanRoutes } from './routes/scans';
 import { searchConsoleRoutes } from './routes/search-console';
+import { detectionRuleRoutes } from './routes/detection-rules';
 import { helperRoutes } from './routes/helper';
 
 /**
@@ -32,6 +33,7 @@ export function createApp(opts: { db?: DbFactory } = {}) {
   app.route('/scans', scanRoutes);
   app.route('/search-console', searchConsoleRoutes);
   app.route('/helper', helperRoutes);
+  app.route('/detection-rules', detectionRuleRoutes);
 
   app.notFound((c) => apiError(c, 404, 'NOT_FOUND', 'This API route does not exist.'));
 

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScanSummary } from '../../src/shared/api';
 import type { Env } from '../../src/worker/env';
 import { fakeInternet } from './fake-net';
+import { clearRulesCache } from '../../src/worker/detection/rules';
 import { drain, queryCounter, queueOf, signedIn, sql, testEnv } from './helpers';
 
 let env: Env;
@@ -56,6 +57,19 @@ describe('database queries', () => {
     const [o] = await drain(env, 1);
     expect(o).toEqual({ kind: 'next', delaySeconds: 0 });
     expect(queryCounter.count).toBeLessThanOrEqual(5);
+  });
+
+  it('suspended-site phrases are read at most once a minute, not per batch', async () => {
+    await api(`/api/scans/${id}/start`, { method: 'POST' });
+    clearRulesCache();
+    queryCounter.reset();
+    await drain(env, 1); // cold: reads the phrases once
+    const first = queryCounter.count;
+    expect(first).toBeLessThanOrEqual(6);
+    queryCounter.reset();
+    await drain(env, 1); // warm: back to the usual budget
+    expect(queryCounter.count).toBeLessThanOrEqual(5);
+    expect(queryCounter.count).toBeLessThan(first);
   });
 
   it('an idle batch (everything reserved elsewhere): at most 3 queries, and it waits', async () => {

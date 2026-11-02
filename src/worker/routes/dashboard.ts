@@ -12,7 +12,7 @@ export const dashboardRoutes = new Hono<AppContext>().get('/', requireAuth(), as
       `SELECT COUNT(*)::int AS scans,
               COALESCE(SUM(checked_count), 0)::int AS checked,
               COALESCE(SUM(active_count), 0)::int AS active,
-              COALESCE(SUM(dead_count + soft_404_count), 0)::int AS dead,
+              COALESCE(SUM(dead_count + soft_404_count + suspended_count), 0)::int AS dead,
               COALESCE(SUM(blocked_count + error_count), 0)::int AS issues
        FROM scans WHERE user_id = $1 AND tool = 'links' AND status <> 'uploading'`,
       [userId],

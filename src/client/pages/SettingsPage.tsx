@@ -6,6 +6,7 @@ import { formatDate } from '../lib/format';
 import { formatNumber } from '../lib/format';
 import { api } from '../api/client';
 import { useAuth } from '../auth/auth-context';
+import { SuspensionRulesSection } from '../components/SuspensionRulesSection';
 
 export function SettingsPage() {
   const { user, signOut } = useAuth();
@@ -49,6 +50,8 @@ export function SettingsPage() {
       <HelperSection />
 
       <SearchConsoleSection />
+
+      <SuspensionRulesSection />
 
       <section className="panel" aria-labelledby="about-heading">
         <h2 id="about-heading" className="section-title">

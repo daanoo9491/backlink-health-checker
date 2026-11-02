@@ -271,6 +271,12 @@ export function ScanPage() {
       group: 'dead',
     },
     {
+      label: 'Suspended',
+      value: links ? count(['SUSPENDED']) : scan.suspendedCount,
+      tone: 'dead',
+      group: 'suspended',
+    },
+    {
       label: 'Redirected',
       value: links ? count(['REDIRECTED']) : scan.redirectedCount,
       tone: 'redirected',
@@ -494,7 +500,7 @@ export function ScanPage() {
       <div className="stat-block">
         {started ? (
           <ul
-            className={`stat-strip stat-cards${isIndex ? ' stat-cards-many' : ''}`}
+            className={`stat-strip stat-cards${cards.length > 5 ? ' stat-cards-many' : ''}`}
             aria-label="Results by unique link. Choose one to show those rows."
           >
             {cards.map((c) => {

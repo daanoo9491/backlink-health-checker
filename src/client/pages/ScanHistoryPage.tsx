@@ -80,6 +80,9 @@ export function ScanHistoryPage() {
                   Dead
                 </th>
                 <th scope="col" className="num">
+                  Suspended
+                </th>
+                <th scope="col" className="num">
                   Need a look
                 </th>
                 <th scope="col">Status</th>
@@ -91,14 +94,14 @@ export function ScanHistoryPage() {
             <tbody>
               {scans === null && !error && (
                 <tr>
-                  <td colSpan={8} className="form-hint">
+                  <td colSpan={9} className="form-hint">
                     Loading…
                   </td>
                 </tr>
               )}
               {scans?.length === 0 && (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={9}>
                     <div className="empty empty-inline">
                       <p className="empty-title">No scans yet</p>
                       <p>Scans you run are saved here, so you can open them again later.</p>
@@ -118,6 +121,7 @@ export function ScanHistoryPage() {
                   <td className="num">{formatNumber(s.uniqueUrls)}</td>
                   <td className="num">{s.checkedCount ? formatNumber(s.activeCount) : '—'}</td>
                   <td className="num">{s.checkedCount ? formatNumber(s.deadCount + s.soft404Count) : '—'}</td>
+                  <td className="num">{s.checkedCount ? formatNumber(s.suspendedCount) : '—'}</td>
                   <td className="num">{s.checkedCount ? formatNumber(s.blockedCount + s.errorCount) : '—'}</td>
                   <td>
                     <ScanStatusBadge status={s.status} />

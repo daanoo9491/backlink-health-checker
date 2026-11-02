@@ -79,7 +79,7 @@ export const INDEX_STATUS_INFO: Record<IndexStatus, IndexStatusInfo> = {
   NOT_REACHABLE: {
     label: 'Page not reachable',
     tone: 'dead',
-    description: 'The page is gone, sends visitors elsewhere, or its domain no longer works.',
+    description: 'The page is gone, sends visitors elsewhere, its site is suspended, or its domain no longer works.',
     advice: 'A page that doesn’t load can’t be indexed. Fix or replace the backlink first.',
   },
   UNKNOWN: {

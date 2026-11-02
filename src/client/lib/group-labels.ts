@@ -14,6 +14,7 @@ export const LINK_GROUPS: GroupOption[] = [
   { key: 'all', label: 'All' },
   { key: 'active', label: 'Active', tone: 'active' },
   { key: 'dead', label: 'Dead', tone: 'dead' },
+  { key: 'suspended', label: 'Suspended', tone: 'dead' },
   { key: 'redirected', label: 'Redirected', tone: 'redirected' },
   { key: 'review', label: 'Need a look', tone: 'review' },
   ...ISSUE_CATEGORIES.filter((c) => c.tone === 'review').map((c) => ({

@@ -6,6 +6,7 @@ export const LINK_STATUSES = [
   'ACTIVE',
   'DEAD',
   'SOFT_404',
+  'SUSPENDED',
   'REDIRECTED',
   'BLOCKED',
   'RATE_LIMITED',
@@ -36,6 +37,13 @@ export const STATUS_INFO: Record<LinkStatus, StatusInfo> = {
     label: 'Soft 404',
     tone: 'dead',
     description: 'The page loads but says it no longer exists, or sends visitors to a home page instead.',
+    retryable: false,
+  },
+  SUSPENDED: {
+    label: 'Suspended / Unavailable',
+    tone: 'dead',
+    description:
+      'The site answers, but only with a hosting notice such as “Account Suspended” or “Website Expired”, so the page isn’t live.',
     retryable: false,
   },
   REDIRECTED: {

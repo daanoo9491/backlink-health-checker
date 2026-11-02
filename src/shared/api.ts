@@ -131,6 +131,8 @@ export interface ScanSummary {
   activeCount: number;
   deadCount: number;
   soft404Count: number;
+  /** Sites showing a hosting suspension notice (Phase 12). */
+  suspendedCount: number;
   redirectedCount: number;
   blockedCount: number;
   errorCount: number;
@@ -194,6 +196,7 @@ export const ROW_FILTER_GROUPS = [
   'all',
   'active',
   'dead',
+  'suspended',
   'redirected',
   'review',
   'unreachable',
@@ -353,4 +356,18 @@ export interface ExportPageResponse {
   next: string | null;
   /** Rows matching the filters (first page only). */
   total: number | null;
+}
+
+// ---------- Suspended-site detection rules (Phase 12) ----------
+
+export interface DetectionRulesResponse {
+  /** Phrases always checked (read-only). */
+  builtIn: string[];
+  /** Phrases the team added. */
+  custom: { id: string; phrase: string; createdAt: string }[];
+  limits: { minLength: number; maxLength: number; maxRules: number };
+}
+
+export interface AddDetectionRuleRequest {
+  phrase: string;
 }

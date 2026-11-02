@@ -13,6 +13,7 @@ import type { Env } from '../env';
 import { BudgetExhausted, SubrequestBudget } from './budget';
 import { checkLink, type CheckResult } from './check-link';
 import { createResolver } from './dns';
+import { suspensionRules } from '../detection/rules';
 import type { IndexSource } from '../../shared/index-status';
 import { searchConsoleFor } from '../gsc/service';
 import { evaluateIndex, type IndexResult } from '../indexing/evaluate';
@@ -143,6 +144,7 @@ export async function runCheckBatch(
       budget,
       blockedHosts: new Set([opts.ownHost.toLowerCase()]),
       skipDns: env.APP_ENV === 'development' && env.CHECKER_SKIP_DNS === 'true',
+      suspensionRules: await suspensionRules(db),
     };
     const byHost = new Map<string, Claimed[]>();
     for (const c of claimed) byHost.set(hostOf(c.url), [...(byHost.get(hostOf(c.url)) ?? []), c]);
@@ -234,6 +236,7 @@ export async function runCheckBatch(
          COUNT(*) FILTER (WHERE status = 'ACTIVE')::int AS active,
          COUNT(*) FILTER (WHERE status = 'DEAD')::int AS dead,
          COUNT(*) FILTER (WHERE status = 'SOFT_404')::int AS soft404,
+         COUNT(*) FILTER (WHERE status = 'SUSPENDED')::int AS suspended,
          COUNT(*) FILTER (WHERE status = 'REDIRECTED')::int AS redirected,
          COUNT(*) FILTER (WHERE status = 'BLOCKED')::int AS blocked,
          COUNT(*) FILTER (WHERE status IN ('RATE_LIMITED', 'SERVER_ERROR', 'TIMEOUT', 'NETWORK_ERROR'))::int AS errors,
@@ -244,7 +247,7 @@ export async function runCheckBatch(
          COUNT(*) FILTER (WHERE index_status = 'UNKNOWN' AND retry_at IS NULL)::int AS idx_unknown
        FROM unique_urls WHERE scan_id = $1)
      UPDATE scans s SET
-       checked_count = c.checked, active_count = c.active, dead_count = c.dead, soft_404_count = c.soft404,
+       checked_count = c.checked, active_count = c.active, dead_count = c.dead, soft_404_count = c.soft404, suspended_count = c.suspended,
        redirected_count = c.redirected, blocked_count = c.blocked, error_count = c.errors,
        indexable_count = c.indexable, index_issue_count = c.idx_issues, index_unknown_count = c.idx_unknown,
        started_at = COALESCE(s.started_at, $2::timestamptz),

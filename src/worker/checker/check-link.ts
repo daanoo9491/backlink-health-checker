@@ -11,9 +11,12 @@ import type { Resolver } from './dns';
 import { extractFacts } from './page-facts';
 import { readPage } from './page-reader';
 import { judgePage } from './soft-404';
+import { judgeSuspended, type SuspensionRules } from './suspended';
 import type { PageSignals } from '../indexing/evaluate';
 
 export const MAX_REDIRECTS = 5;
+/** Error answers whose page is read, because hosts show suspension notices with them. */
+const SUSPENSION_ERROR_CODES = new Set([403, 500, 503]);
 export const TIMEOUT_MS = 15_000;
 
 // Honest identification, with a browser-like prefix because many sites
@@ -54,6 +57,8 @@ export interface CheckDeps {
   blockedHosts: Set<string>;
   /** Development only: skip the DNS check (no DoH access). */
   skipDns?: boolean;
+  /** Suspended-site phrases (built-in + the team's own); built-in only when absent. */
+  suspensionRules?: SuspensionRules;
   timeoutMs?: number;
 }
 
@@ -204,15 +209,22 @@ export async function checkLink(originalUrl: string, deps: CheckDeps): Promise<C
 
   const retryAfter = res.headers.get('Retry-After');
   const ok = res.status >= 200 && res.status < 300;
-  // A page that loaded is read (size-capped) to spot soft 404s and read its
-  // indexing signals; any other body is never needed, so it is released.
-  const page = ok ? await readPage(res) : null;
-  if (!ok) await res.body?.cancel().catch(() => undefined);
+  // Some hosts show their "account suspended" notice with an error code.
+  const errorPage = SUSPENSION_ERROR_CODES.has(res.status);
+  // A page that loaded is read (size-capped) to spot soft 404s, suspended sites
+  // and its indexing signals; any other body is never needed, so it is released.
+  const page = ok || errorPage ? await readPage(res) : null;
+  if (!page) await res.body?.cancel().catch(() => undefined);
 
   const classified = classifyResponse(res.status, startUrl, finalUrl);
   const facts = page?.isHtml ? extractFacts(page.html) : null;
-  // "200 OK" isn't the whole story: the page may say it's gone, or be a bot check.
-  const verdict = ok ? judgePage(startUrl, finalUrl, facts) : null;
+  // "200 OK" isn't the whole story: the page may say it's gone or suspended, or be a bot check.
+  const suspendedError = errorPage && facts ? judgeSuspended(facts, deps.suspensionRules) : null;
+  const verdict = ok
+    ? judgePage(startUrl, finalUrl, facts, deps.suspensionRules)
+    : suspendedError
+      ? { status: 'SUSPENDED' as const, reason: `${suspendedError} (HTTP ${res.status})` }
+      : null;
   const { status, reason } = verdict ?? classified;
   return {
     status,
