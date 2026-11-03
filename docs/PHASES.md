@@ -258,3 +258,13 @@ At the team's request the staging setup became the only one: it was the one in d
 
 - Links checked before this version keep their old result until they're checked again (run the scan again, or a new scan).
 - A suspension notice drawn only by JavaScript isn't seen (the same limit as soft 404s).
+
+## Fix (0.15.1): suspended blogs inside a full page layout
+
+Reported: a dailyblogzz.com post showed **Active**, but the page says “Account has been disabled due to a violation of Terms of Service. Contact Moderators”. That network keeps the post's title and layout, puts the notice in the page's **second** `<h1>` (and an `<h2>`), and hides ~250 spam links in a `display:none` block, so the page looked long. Three changes:
+
+- **Every main heading is read** (`PageFacts.headings`, up to 5 `<h1>`s), not only the first. A heading counts when it is a phrase, or when one of its sentences states a phrase with a reason and ends with a full stop (“Account has been disabled due to a violation of Terms of Service. Contact Moderators”). Headings containing a question never count, and a reason without a full stop (an article title like “Account Suspended for Policy Violation – How to Appeal”) doesn't either.
+- **Hidden text doesn't count**: elements with `display:none`, `visibility:hidden` or the `hidden` attribute are left out of the page text (removed up to their first closing tag; never removes visible text). This also helps the soft-404 rules on pages stuffed with hidden links.
+- **14 more built-in phrases** (41 in all): Account has been disabled / deactivated, This blog has been suspended / disabled / removed, This website / site has been disabled, Disabled / Suspended due to a violation of Terms of Service, and similar.
+- Reasons quote up to 120 characters of the notice.
+- **Tested** with the real page saved as `tests/fixtures/suspended-dailyblogzz.html` (now Suspended / Unavailable, with the notice as the reason), five more notice wordings inside a long layout, and five look-alike headings on long articles that must stay Active (a question, an article title with a reason, a how-to, a news headline, an ordinary “Comments” heading).

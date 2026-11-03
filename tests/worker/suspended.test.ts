@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DetectionRulesResponse, ScanDetail, ScanRowsResponse } from '../../src/shared/api';
 import { SubrequestBudget } from '../../src/worker/checker/budget';
@@ -295,5 +297,74 @@ describe('Settings → Suspended sites (API) and a full scan', () => {
     expect(rows.rows.map((r) => r.url)).toEqual(['https://sus.example.com/b', 'https://own.example.com/c']);
     expect(rows.facets.groups.suspended).toBe(2);
     expect(rows.facets.links.byStatus.SUSPENDED).toBe(2);
+  });
+});
+
+describe('notices inside a full blog layout (dailyblogzz and similar networks)', () => {
+  // The real page reported by the team: the post's title is kept, the notice is
+  // the page's second <h1>, and ~250 hidden spam links make it look long.
+  const REAL = readFileSync(join(__dirname, '..', 'fixtures', 'suspended-dailyblogzz.html'), 'utf8');
+  const URL_ = 'https://lanopbusinessandtax.dailyblogzz.com/38365000/title-accountants-for-ai-companies';
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reads every main heading and ignores the hidden links', () => {
+    const f = extractFacts(REAL);
+    expect(f.title).toMatch(/^Title: Accountants for AI Companies/);
+    expect(f.headings).toHaveLength(3);
+    expect(f.headings[1]).toBe('Account has been disabled due to a violation of Terms of Service. Contact Moderators');
+    expect(f.text).not.toContain('aibacklinks.space');
+    expect(f.textLength).toBeLessThan(1000);
+  });
+
+  it('the real page is Suspended / Unavailable, not Active', async () => {
+    fakeInternet({ 'lanopbusinessandtax.dailyblogzz.com': ['93.184.216.34'] }, { [URL_]: { status: 200, html: REAL } });
+    const r = await checkLink(URL_, {
+      resolver: createResolver(),
+      budget: new SubrequestBudget(45),
+      blockedHosts: new Set(),
+      timeoutMs: 500,
+    });
+    expect(r.status).toBe('SUSPENDED');
+    expect(r.reason).toBe(
+      'The site is suspended or unavailable: its heading says “Account has been disabled due to a violation of Terms of Service. Contact Moderators”',
+    );
+  });
+
+  const page = (h1s: string[], body = '') =>
+    extractFacts(
+      `<html><head><title>My post | Blog</title></head><body>${h1s.map((h) => `<h1>${h}</h1>`).join('')}${body}` +
+        `<div style="display:none">${'<a href="https://spam.example/x">spam-link-domain.example</a><br>'.repeat(300)}</div></body></html>`,
+    );
+  const longBody = `<p>${'A genuine article with plenty of useful, original advice for business owners. '.repeat(60)}</p>`;
+
+  it.each([
+    [
+      'a reason after the phrase',
+      'Account has been disabled due to a violation of Terms of Service. Contact Moderators',
+    ],
+    ['suspended for a reason', 'This blog has been suspended for violating our Terms of Service.'],
+    ['blog removed', 'This blog has been removed'],
+    ['deactivated', 'Account has been deactivated.'],
+    ['two sentences, notice second', 'Sorry! This account has been suspended.'],
+  ])('heading: %s', (_n, heading) => {
+    expect(judgeSuspended(page(['My post title', heading], longBody))).toMatch(/its heading says/);
+  });
+
+  it.each([
+    ['a question', 'Account suspended. What now?'],
+    ['an article heading with a reason but no full stop', 'Account Suspended for Policy Violation – How to Appeal'],
+    ['a how-to', 'How to fix “Account has been disabled” on Instagram'],
+    ['a headline', 'Popular blog has been suspended after complaints, says host'],
+    ['an ordinary second heading', 'Comments'],
+  ])('a long article is not marked suspended: %s', (_n, heading) => {
+    expect(judgeSuspended(page(['My post title', heading], longBody))).toBeNull();
+  });
+
+  it('hidden blocks are left out of the text, visible text is kept', () => {
+    const f = extractFacts(
+      '<html><body><p>Before</p><div hidden>secret one</div><span style="visibility: hidden">secret two</span>' +
+        '<div style="color:red; display : none">secret three</div><p>After</p></body></html>',
+    );
+    expect(f.text).toBe('Before After');
   });
 });

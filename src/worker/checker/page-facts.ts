@@ -10,6 +10,9 @@ import { headSignals, type MetaTag } from '../indexing/signals';
 export interface PageFacts {
   title: string | null;
   h1: string | null;
+  /** Every <h1> on the page (at most MAX_HEADINGS), in order. Some sites keep the
+   *  post's title as the first heading and put a notice in a second one. */
+  headings: string[];
   /** Visible text from the start of <body>, whitespace collapsed, at most TEXT_SAMPLE chars. */
   text: string;
   /** Length of the visible text in the scanned slice (capped at TEXT_COUNT_CAP). */
@@ -63,6 +66,23 @@ function innerText(html: string): string {
   return squash(decodeEntities(html.replace(/<[^>]*>/g, ' ')));
 }
 
+const MAX_HEADINGS = 5;
+
+/** The text of every <tag> element, in order (at most `max`). */
+function allElements(html: string, tag: string, max: number): string[] {
+  const out: string[] = [];
+  const open = new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'gi');
+  for (let m = open.exec(html); m && out.length < max; m = open.exec(html)) {
+    const start = m.index + m[0].length;
+    const inner = html.slice(start, start + 4096);
+    const end = new RegExp(`</${tag}\\s*>`, 'i').exec(inner);
+    if (!end) break;
+    const text = innerText(inner.slice(0, end.index));
+    if (text) out.push(text.slice(0, MAX_LABEL));
+  }
+  return out;
+}
+
 function firstElement(rest: string, tag: string): string | null {
   const open = new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'i');
   const m = open.exec(rest);
@@ -78,6 +98,16 @@ function firstElement(rest: string, tag: string): string | null {
 /** Removes blocks whose content is never visible text. */
 const INVISIBLE = /<(script|style|noscript|template|svg|iframe|object)\b[\s\S]*?<\/\1\s*>|<!--[\s\S]*?-->/gi;
 
+/**
+ * Elements a visitor never sees: style="display:none" / "visibility:hidden" or
+ * the hidden attribute. Some sites hide hundreds of spam links this way, which
+ * would otherwise make a one-line notice look like a long page. Removed up to
+ * the first matching closing tag; a nested element of the same kind just
+ * leaves some hidden text in (never removes visible text).
+ */
+const HIDDEN =
+  /<(div|span|p|ul|ol|section|aside|nav)\b[^>]*?(?:\sstyle\s*=\s*["'][^"']*?(?:display\s*:\s*none|visibility\s*:\s*hidden)|\shidden(?=[\s>=/]))[^>]*>[\s\S]*?<\/\1\s*>/gi;
+
 /** Without a <body> tag, this much of the page is treated as its <head>. */
 const HEAD_FALLBACK = 64 * 1024;
 
@@ -91,12 +121,17 @@ export function extractFacts(html: string): PageFacts {
 
   const slice = html.slice(Math.max(0, bodyAt), Math.max(0, bodyAt) + BODY_SLICE);
   // …and a script cut off by the size cap runs to the end of the slice.
-  const visible = slice.replace(INVISIBLE, ' ').replace(/<(script|style)\b[\s\S]*$/i, ' ');
+  const visible = slice
+    .replace(INVISIBLE, ' ')
+    .replace(/<(script|style)\b[\s\S]*$/i, ' ')
+    .replace(HIDDEN, ' ');
   const h1 = firstElement(visible, 'h1');
+  const headings = allElements(visible, 'h1', MAX_HEADINGS);
   const text = squash(decodeEntities(visible.replace(/<[^>]*>/g, ' ')));
   return {
     title,
     h1,
+    headings,
     text: text.slice(0, TEXT_SAMPLE),
     textLength: Math.min(text.length, TEXT_COUNT_CAP),
     robotsMeta,

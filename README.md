@@ -9,7 +9,7 @@ An internal tool for our Marketing team, with two tools behind one sign-in:
 
 The app runs on Cloudflare; data is stored in Supabase Postgres.
 
-> **Phase 12 (suspended sites).** Pages that answer “200 OK” (or 403/500/503) but only show a hosting notice such as **“Account Suspended”**, **“This Account Has Been Suspended”**, **“Website Suspended”**, **“Hosting Account Suspended”** or **“Website Expired”** are marked **Suspended / Unavailable**, not Active, with the matching text as the reason. They have their own summary card, filter, issue category, column in Scan history and in downloads; index checks report them as Page not reachable. 27 phrases are built in; the team can add more in **Settings → Suspended sites**.
+> **Phase 12 (suspended sites).** Pages that answer “200 OK” (or 403/500/503) but only show a hosting notice such as **“Account Suspended”**, **“This Account Has Been Suspended”**, **“Website Suspended”**, **“Hosting Account Suspended”** or **“Website Expired”** are marked **Suspended / Unavailable**, not Active, with the matching text as the reason. They have their own summary card, filter, issue category, column in Scan history and in downloads; index checks report them as Page not reachable. 41 phrases are built in; the team can add more in **Settings → Suspended sites**.
 >
 > **One live app (since 0.14.0).** There is a single Worker, `backlink-health-checker-staging` (it kept its name so its address, sign-in and data didn't change), with one Supabase project (`bhc-staging`) and one queue (`bhc-checks-staging`). Pushing `development` deploys it. The separate production Worker, its Supabase project, Hyperdrive config and queue, and the old D1 databases were retired; see _Retiring the old production setup_ below.
 
